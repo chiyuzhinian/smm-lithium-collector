@@ -1,0 +1,33 @@
+site:
+  source: "SMM"
+  market: "SMM锂电现货"
+categories:
+  mode: "auto"          # "auto" = 自动发现全部；"manual" = 使用下方 items 列表
+  items:                # mode: "manual" 时的固定分类列表（保留用于测试/特定场景）
+    - {name: "锂金属", code: "lithium_metal"}
+    - {name: "锂矿", code: "lithium_ore"}
+    - {name: "锂化合物", code: "lithium_compound"}
+output:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  export_dir: "data/exports"
+  fixed_export_dir: "data/exports/固定汇总"
+  screenshot_dir: "data/screenshots"
+  database_path: "data/database/smm_lithium.db"
+browser: {headless: true, timeout_ms: 30000, slow_mo_ms: 0}
+collector:
+  max_retries: 3
+  retry_base_seconds: 3
+  save_html: true
+  save_screenshot: true
+  prefer_api: true
+  continue_on_category_failure: true
+  require_all_categories_for_success: true
+  max_scroll_attempts: 30
+rolling_price_export:
+  enabled: true                # 是否开启近N日展示
+  window_days: 3               # 统计窗口天数
+  use_distinct_price_dates: true  # 使用最近N个实际存在的价格日期
+  include_warning_records: true   # warning数据参与均价计算
+  exclude_invalid_records: true   # invalid数据不参与均价计算
+  add_valid_day_count: true       # 是否输出近三日有效天数列

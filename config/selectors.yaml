@@ -1,0 +1,21 @@
+# Populate only after running scripts/inspect_page.py and reviewing its report.
+# Text/role discovery is used by default; no unverified SMM CSS selectors are shipped.
+category:
+  # Confirmed by inspect_page.py on 2026-07-22: categories are section headings,
+  # not clickable tabs. Each heading is followed by its own Ant Design table.
+  mode: "section"
+  container: null
+  item: ".FilterTable_categoryName__izrKr"
+  active_attribute: null
+  active_value: null
+data:
+  table: ".ant-table table"
+  row: ".ant-table tbody tr"
+  loading: null
+pagination:
+  next: null
+  disabled_attribute: null
+scroll:
+  container: null
+more_button: null
+date_control: null

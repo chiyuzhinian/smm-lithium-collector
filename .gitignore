@@ -1,0 +1,13 @@
+.env
+data/auth/
+data/raw/
+data/processed/
+data/screenshots/
+data/database/
+data/exports/
+logs/
+__pycache__/
+.pytest_cache/
+.pytest_tmp/
+.venv/
+*.py[cod]
