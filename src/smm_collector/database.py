@@ -60,6 +60,8 @@ class Database:
 							stats["inserted"] += 1
 						elif old[1] == row["record_hash"]:
 							stats["duplicate"] += 1
+						elif self._is_worse_quality(con, old[0], row):
+							stats["duplicate"] += 1
 						else:
 							con.execute(
 								"UPDATE lithium_spot_prices SET min_price=?,max_price=?,"
@@ -137,6 +139,31 @@ class Database:
 				"SELECT * FROM lithium_spot_prices ORDER BY category, product_name, price_date"
 			).fetchall()
 		return [dict(r) for r in rows]
+
+	@staticmethod
+	def _is_worse_quality(con, old_id: int, new_row: dict) -> bool:
+		"""判断新数据是否质量差于已有数据（防止坏数据覆盖好数据）。"""
+		old_rec = con.execute(
+			"SELECT unit, product_name, validation_status FROM lithium_spot_prices WHERE id=?",
+			(old_id,)).fetchone()
+		if not old_rec:
+			return False
+		old_unit = (old_rec[0] or "").strip()
+		new_unit = (new_row.get("unit") or "").strip()
+		old_pn = (old_rec[1] or "").strip()
+		new_pn = (new_row.get("product_name") or "").strip()
+		old_status = old_rec[2]
+		new_status = new_row.get("validation_status", "valid")
+		# 已有unit非空，新数据unit为空 → 新数据更差
+		if old_unit and not new_unit:
+			return True
+		# 已有valid，新数据invalid → 新数据更差
+		if old_status == "valid" and new_status == "invalid":
+			return True
+		# 已有具体品名，新品名为空或等于分类名 → 新数据更差
+		if old_pn and (not new_pn or new_pn == new_row.get("category", "")):
+			return True
+		return False
 
 	@staticmethod
 	def _decimal_text(value):

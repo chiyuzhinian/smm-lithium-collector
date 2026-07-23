@@ -303,6 +303,51 @@ MySQL 中三张表：`smm_price_records`（价格）、`smm_data_quality_issues`
 | `QUERIES.md` | SQL 查询手册、常用查询示例 |
 | `CLAUDE.md` | 开发者技术文档、架构说明 |
 
+---
+
+## 部署到其他服务器
+
+### 1. 克隆项目
+
+```bat
+git clone https://github.com/chiyuzhinian/smm-lithium-collector.git
+cd smm-lithium-collector
+```
+
+### 2. 安装依赖
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 3. 配置
+
+```bat
+copy .env.example .env
+```
+
+编辑 `.env`，填写 SMM 网址、MySQL 连接、钉钉 Webhook 等。
+
+### 4. 首次登录
+
+```bat
+.venv\Scripts\python.exe scripts\manual_login.py
+```
+
+### 5. 测试运行
+
+```bat
+.venv\Scripts\python.exe scripts\run_daily.py --dry-run
+
+# 正常后设置定时任务
+powershell -ExecutionPolicy Bypass -File .\scripts\install_daily_task.ps1
+```
+
+> 新服务器可以只配 SMM 采集，不需要 MySQL/钉钉，把 `.env` 中对应配置留空即可。
+
 ## 退出码
 
 | 码 | 含义 |
