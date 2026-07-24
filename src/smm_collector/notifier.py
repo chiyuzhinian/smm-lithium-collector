@@ -1,9 +1,9 @@
-"""钉钉通知模块。采集完成后发送含价格数据和下载链接的日报。"""
+"""钉钉通知模块。"""
 from __future__ import annotations
 import base64, hashlib, hmac, json, logging, os, sqlite3, time
 from datetime import datetime
 from decimal import Decimal
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, quote
 import httpx
 
 log = logging.getLogger("smm_collector.notify")
@@ -44,7 +44,7 @@ async def send_dingtalk(title, text):
             r = await c.post(_signed_url(), json={"msgtype":"markdown","markdown":{"title":title,"text":text}})
             if r.status_code == 200 and r.json().get("errcode") == 0:
                 log.info("dingtalk ok"); return True
-            log.warning("dingtalk fail %s %s", r.status_code, r.text)
+            log.warning("dingtalk fail %s", r.status_code)
     except Exception: log.exception("dingtalk error")
     return False
 
@@ -52,11 +52,12 @@ def _get_download_url(td):
     fh = os.getenv("FILE_HOST", "")
     if not fh:
         try:
-            import socket as _s
-            ss = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
-            ss.connect(("8.8.8.8", 80)); fh = f"http://{ss.getsockname()[0]}:8888"; ss.close()
+            import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80)); fh = f"http://{s.getsockname()[0]}:8888"; s.close()
         except: pass
-    if fh: return f"{fh}/{td[:4]}/{td[5:7]}/每日汇总/Excel/SMM锂电现货价格_{td}.xlsx"
+    if fh:
+        path = quote(f"{td[:4]}/{td[5:7]}/每日汇总/Excel/SMM锂电现货价格_{td}.xlsx", safe="/")
+        return f"{fh}/{path}"
     return ""
 
 def _query(db_path):
@@ -84,13 +85,11 @@ def build_report_message(meta, sync_stats=None, db_path=None):
     lines.append(f"**分类**：{len(meta.get('success_categories',[]))}/{len(meta.get('expected_categories',[]))} | **数据**：{meta.get('total_clean_rows',0)}条")
     if sync_stats:
         lines.append(f"**MySQL**：新增{sync_stats.get('inserted',0)} 更新{sync_stats.get('updated',0)} 跳过{sync_stats.get('skipped',0)}")
-
     if db_path:
         kr, ar = _query(db_path)
         if kr:
             lines.append(f"\n#### 核心品种 ({kr[0].get('price_date','')})")
-            lines.append("| 品种 | 均价 | 涨跌 |")
-            lines.append("|------|------|------|")
+            lines.append("| 品种 | 均价 | 涨跌 |\n|------|------|------|")
             for r in kr[:12]:
                 chg = r.get("change_value"); cs = ""
                 if chg is not None:
@@ -99,14 +98,11 @@ def build_report_message(meta, sync_stats=None, db_path=None):
                 lines.append(f"| {r['product_name'][:18]} | {_fmt(r.get('average_price'))} | {cs} |")
         if ar:
             lines.append(f"\n#### 近三日均价 ({ar[0].get('days',0)}日窗口)")
-            lines.append("| 品种 | 三日均价 | 天数 |")
-            lines.append("|------|---------|------|")
+            lines.append("| 品种 | 三日均价 | 天数 |\n|------|---------|------|")
             for r in ar[:10]:
                 lines.append(f"| {r['product_name'][:18]} | {_fmt(r.get('avg3'))} | {r['days']} |")
-
     if meta.get("failed_categories"):
         lines.append(f"\n> 失败：{'、'.join(meta['failed_categories'][:5])}")
-
     dl = _get_download_url(td)
     if dl: lines.append(f"\n[点击下载今日Excel]({dl})")
     lines.append(f"⏰ {datetime.now().strftime('%H:%M')}")
