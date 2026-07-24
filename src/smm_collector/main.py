@@ -141,7 +141,7 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 	# 钉钉通知
 	try:
 		from .notifier import send_daily_notification
-		await send_daily_notification(meta, sync_stats)
+		await send_daily_notification(meta, sync_stats, str(cfg.path("database_path")))
 	except Exception:
 		pass
 	return meta
