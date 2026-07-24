@@ -214,4 +214,17 @@ def export_daily(rows, meta, export_root: Path, target_date, db=None, rolling_co
 		_style(fixed_tmp)
 		os.replace(fixed_tmp, fixed)
 
+	# 复制到 OneDrive（如果配置了 ONEDRIVE_EXPORT_DIR）
+	onedrive = os.getenv("ONEDRIVE_EXPORT_DIR", "")
+	if onedrive:
+		try:
+			od = Path(onedrive) / f"{target_date:%Y}" / f"{target_date:%m}"
+			od.mkdir(parents=True, exist_ok=True)
+			import shutil
+			shutil.copy2(xlsx, od / xlsx.name)
+			shutil.copy2(csv, od / csv.name)
+			log.info("已复制到OneDrive: %s", od)
+		except Exception:
+			log.warning("OneDrive复制失败")
+
 	return xlsx, csv
