@@ -107,8 +107,12 @@ def export_daily(rows, meta, export_root: Path, target_date, db=None, rolling_co
 	out.mkdir(parents=True, exist_ok=True)
 	summary_dir = out / "每日汇总"
 	summary_dir.mkdir(parents=True, exist_ok=True)
+	excel_dir = summary_dir / "Excel"
+	excel_dir.mkdir(parents=True, exist_ok=True)
+	csv_summary_dir = summary_dir / "CSV"
+	csv_summary_dir.mkdir(parents=True, exist_ok=True)
 	stem = f"SMM锂电现货价格_{target_date}"
-	xlsx = summary_dir / f"{stem}.xlsx"
+	xlsx = excel_dir / f"{stem}.xlsx"
 	tmp = xlsx.with_suffix(".tmp.xlsx")
 
 	rolling_data = _build_rolling_data(db, rolling_config or {}, str(target_date), log)
@@ -148,7 +152,7 @@ def export_daily(rows, meta, export_root: Path, target_date, db=None, rolling_co
 	wb.save(tmp)
 	os.replace(tmp, xlsx)
 
-	csv = summary_dir / f"{stem}.csv"
+	csv = csv_summary_dir / f"{stem}.csv"
 	df.to_csv(csv, index=False, encoding="utf-8-sig")
 	for cat in cats:
 		cat_dir = out / _safe_csv_name(cat)

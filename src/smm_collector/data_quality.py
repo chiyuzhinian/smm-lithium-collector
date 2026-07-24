@@ -41,7 +41,7 @@ def generate_daily_report(meta: dict, sync_stats: dict | None = None,
 		}
 	if output_dir:
 		target = meta.get("target_date", date.today().isoformat())
-		out = output_dir / f"{target[:4]}" / f"{target[5:7]}" / "每日汇总"
+		out = output_dir / f"{target[:4]}" / f"{target[5:7]}" / "每日汇总" / "Excel"
 		out.mkdir(parents=True, exist_ok=True)
 		path = out / f"SMM数据质量报告_{target}.json"
 		path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
