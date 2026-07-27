@@ -1,16 +1,21 @@
 # SMM 锂电现货价格每日采集
 
-每天早上一条命令，自动完成：采集 → 清洗 → 校验 → SQLite 入库 → 近三日均价计算 → Excel/CSV 导出 → MySQL 同步 → 质量报告。
+每天早上一条命令，自动完成：采集 → 清洗 → 校验 → SQLite 入库 → 近三日均价计算 → 两份 Excel 导出 → MySQL 同步 → 钉钉群通知（含下载链接）。
 
 ## 快速开始
 
 ```bat
-REM 每天运行这一条即可（采集 + 自动同步 MySQL）
+REM 每天运行这一条即可（采集 + 钉钉通知 + 文件下载链接）
 cd /d C:\科研\smm_lithium_collector && .venv\Scripts\python.exe scripts\run_daily.py
 ```
 
+设置 Windows 定时任务后每天 9:00 自动执行，**无需手动操作**。
+
+> 钉钉群收到消息后，点链接直接在浏览器下载 Excel。需要先启动 ngrok（见下方「文件下载」章节）。
+
 运行完成后：
-- 当天 Excel：`data\exports\2026\07\23\SMM锂电现货价格_2026-07-23.xlsx`
+- 钉钉群收到日报 + 两个 Excel 下载链接
+- 本地 Excel：`data/exports/2026/07/25/每日汇总/Excel/`
 - MySQL 数据库 `smm_lithium` 已自动同步
 
 ---
@@ -287,6 +292,23 @@ MySQL 中三张表：`smm_price_records`（价格）、`smm_data_quality_issues`
 - Chromium（Playwright 自动下载）
 - 有效的 SMM 账号
 - 电脑开机 + 网络正常
+
+## 文件下载（ngrok 内网穿透）
+
+无公网 IP 也能让外网下载 Excel。使用 ngrok 免费方案：
+
+```bat
+REM 1. 注册 ngrok 免费账号：https://dashboard.ngrok.com/signup
+REM 2. 获取 authtoken，配置一次：
+ngrok.exe config add-authtoken 你的token
+
+REM 3. 启动 ngrok（后台运行，每天采集前自动拉起）
+start /b ngrok.exe http 8888
+```
+
+之后每天的 `run_daily.bat` 会自动启动 ngrok + 文件服务器，通知模块自动检测 ngrok 公网 URL 生成下载链接。钉钉联系人联网即可下载，不限局域网。
+
+---
 
 ## 安全说明
 

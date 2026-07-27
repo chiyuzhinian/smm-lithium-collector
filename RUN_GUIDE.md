@@ -1,6 +1,24 @@
 # SMM 锂电现货价格采集 — 每日运行指南
 
-## 一、每天早上运行一条命令
+## 一、每天自动执行（无需手动）
+
+已配置 Windows 定时任务：**周一至周五 9:00 自动运行**。电脑开机联网即可，钉钉群自动收日报。
+
+如需手动运行：
+
+```bat
+cd /d C:\科研\smm_lithium_collector && .venv\Scripts\python.exe scripts\run_daily.py
+```
+
+### 首次使用：启动 ngrok（一次性）
+
+```bat
+cd /d C:\科研\smm_lithium_collector
+ngrok.exe config add-authtoken 你的ngrok的token
+start /b ngrok.exe http 8888
+```
+
+之后每天 `run_daily.bat` 会自动拉起 ngrok，无需手动操作。
 
 打开终端（CMD 或 PowerShell），粘贴执行：
 
