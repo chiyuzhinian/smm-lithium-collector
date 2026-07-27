@@ -11,3 +11,4 @@ __pycache__/
 .pytest_tmp/
 .venv/
 *.py[cod]
+ngrok.exe
