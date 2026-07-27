@@ -27,9 +27,20 @@ async def send_dingtalk(title, text):
     return False
 
 def _dl_url(td, filename):
-    """生成文件下载链接。"""
+    """生成文件下载链接。优先 FILE_HOST 环境变量，其次 ngrok 自动检测。"""
     fh = os.getenv("FILE_HOST", "")
     if not fh:
+        # 尝试 ngrok 本地 API
+        try:
+            import urllib.request, json as _j
+            r = urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=3)
+            data = _j.loads(r.read())
+            for t in data.get("tunnels", []):
+                if t.get("proto") == "https":
+                    fh = t["public_url"]; break
+        except: pass
+    if not fh:
+        # 回退：局域网 IP
         try:
             import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80)); fh = f"http://{s.getsockname()[0]}:8888"; s.close()
