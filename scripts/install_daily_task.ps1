@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$TaskName = "SMM_Lithium_Daily_Collector",
-    [string]$RunAt = "10:00"
+    [string]$RunAt = "09:00"
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,11 +21,15 @@ $action = New-ScheduledTaskAction `
     -Execute "cmd.exe" `
     -Argument "/d /c `"`"$batchFile`"`"" `
     -WorkingDirectory $projectRoot
-$trigger = New-ScheduledTaskTrigger -Daily -At $time
+
+# 仅工作日（周一到周五）
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At $time
+
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+
 $principal = New-ScheduledTaskPrincipal `
     -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
     -LogonType Interactive `
@@ -37,7 +41,7 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description "Collect SMM lithium spot prices daily at 10:00 and export dated Excel/CSV files." `
+    -Description "Collect SMM lithium spot prices daily at $RunAt (Mon-Fri only)" `
     -Force | Out-Null
 
 $task = Get-ScheduledTask -TaskName $TaskName
@@ -45,5 +49,5 @@ $info = Get-ScheduledTaskInfo -TaskName $TaskName
 Write-Host "Scheduled task installed successfully."
 Write-Host "Task name: $($task.TaskName)"
 Write-Host "Task state: $($task.State)"
+Write-Host "Schedule: Mon-Fri at $RunAt"
 Write-Host "Next run: $($info.NextRunTime)"
-Write-Host "Runner: $batchFile"
