@@ -77,13 +77,16 @@ def match_smm_product(smm_rows: list[dict], entry: dict) -> dict | None:
     ssm_alias = entry.get("ssm_alias", "")
     category = entry.get("category", "")
 
+    # 期望单位
+    expected_unit = entry.get("unit", "")
     candidates = []
     for r in smm_rows:
         pn = str(r.get("product_name", ""))
         spec = str(r.get("specification", ""))
         cat = str(r.get("category", ""))
+        unit = str(r.get("unit", ""))
 
-        # 匹配规则：category + product_name + (optional) specification
+        # 匹配规则：category + product_name + (optional) specification + unit
         if category and cat != category:
             continue
         if product_key and product_key not in pn:
@@ -91,14 +94,18 @@ def match_smm_product(smm_rows: list[dict], entry: dict) -> dict | None:
                 continue
         if product_spec and product_spec not in spec:
             continue
+        # 单位检查：防止元/吨匹配到%或元/Wh等不同单位
+        if expected_unit and unit and expected_unit != unit:
+            continue
         candidates.append(r)
 
     if not candidates and ssm_alias:
-        # 用别名重试
         for r in smm_rows:
             pn = str(r.get("product_name", ""))
-            if ssm_alias in pn or product_key in pn:
-                candidates.append(r)
+            unit = str(r.get("unit", ""))
+            if (ssm_alias in pn or product_key in pn):
+                if not expected_unit or not unit or expected_unit.split("/")[-1] == unit.split("/")[-1]:
+                    candidates.append(r)
 
     if len(candidates) == 1:
         return candidates[0]
