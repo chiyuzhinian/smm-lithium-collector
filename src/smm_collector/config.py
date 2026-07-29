@@ -24,6 +24,11 @@ class AppConfig:
         return "manual"  # legacy list format
 
     @property
+    def additional_sources(self) -> dict:
+        """附加数据源配置。"""
+        return self.settings.get("additional_sources", {})
+
+    @property
     def categories_items(self) -> list:
         """Return explicit category items when mode is 'manual'."""
         cats = self.settings.get("categories", [])

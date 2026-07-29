@@ -31,3 +31,58 @@ rolling_price_export:
   include_warning_records: true   # warning数据参与均价计算
   exclude_invalid_records: true   # invalid数据不参与均价计算
   add_valid_day_count: true       # 是否输出近三日有效天数列
+additional_sources:
+  enabled: true                # 是否采集附加数据源
+  continue_on_source_failure: true  # 单个源失败不影响其他
+  stale_after_days: 5          # 超过N天未更新的报价视为陈旧
+  items:
+    - code: "smm_aluminum"
+      name: "SMM铝现货"
+      source: "SMM"
+      market: "SMM基础金属现货"
+      url: "https://hq.smm.cn/aluminum/category/201102250311"
+      category: "基础金属"
+      selectors:
+        table: ".ant-table table"
+        row: ".ant-table tbody tr"
+      required_products:
+        - canonical_name: "A00铝"
+          aliases: ["A00铝", "SMM A00铝"]
+          material_attribute: "原料"
+          info_category: "金属"
+          chemistry: "铝"
+          unit: "元/吨"
+
+    - code: "smm_copper"
+      name: "SMM铜现货"
+      source: "SMM"
+      market: "SMM基础金属现货"
+      url: "https://hq.smm.cn/copper/category/201102250376"
+      category: "基础金属"
+      selectors:
+        table: ".ant-table table"
+        row: ".ant-table tbody tr"
+      required_products:
+        - canonical_name: "1#电解铜"
+          aliases: ["1#电解铜", "SMM 1#电解铜", "1号电解铜"]
+          material_attribute: "原料"
+          info_category: "金属"
+          chemistry: "铜"
+          unit: "元/吨"
+
+    - code: "smm_nickel"
+      name: "SMM镍现货"
+      source: "SMM"
+      market: "SMM基础金属现货"
+      url: "https://hq.smm.cn/nickel/category/201102250239"
+      category: "基础金属"
+      selectors:
+        table: ".ant-table table"
+        row: ".ant-table tbody tr"
+      required_products:
+        - canonical_name: "1#电解镍"
+          aliases: ["1#电解镍", "SMM 1#电解镍", "1号电解镍"]
+          material_attribute: "原料"
+          info_category: "金属"
+          chemistry: "镍"
+          unit: "元/吨"
