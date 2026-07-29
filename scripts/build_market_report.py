@@ -43,13 +43,15 @@ def find(entry):
         if not name: continue
         if name in pm:
             dp = pm[name]
-            pds = sorted(dp.keys())  # all dates for this material
+            pds = sorted(dp.keys())
             pp = [v for d, v in dp.items() if d in month_dates]
             if pp:
                 avg = sum(pp) / len(pp)
-                fm = [d for d in pds if d in month_dates]
-                first = dp.get(fm[0]) if fm else None
-                return avg, first, fm[0] if fm else None, pds[-1] if pds else None
+                # 涨跌基准：最早3个数据日期的均价，防止单日波动
+                first3_vals = [dp[d] for d in pds[:3] if d in dp]
+                baseline = sum(first3_vals) / len(first3_vals) if first3_vals else None
+                baseline_dates = f"{pds[0]}~{pds[min(2,len(pds)-1)]}" if len(pds)>=2 else pds[0]
+                return avg, baseline, baseline_dates, pds[-1] if pds else None
     for key, dp in pm.items():
         pn_part = key.split("|")[0]; spec_part = key.split("|")[1] if "|" in key else ""
         matched = False
@@ -61,9 +63,10 @@ def find(entry):
         pp = [v for d, v in dp.items() if d in month_dates]
         if pp:
             avg = sum(pp) / len(pp)
-            fm = [d for d in pds if d in month_dates]
-            first = dp.get(fm[0]) if fm else None
-            return avg, first, fm[0] if fm else None, pds[-1] if pds else None
+            first3_vals = [dp[d] for d in pds[:3] if d in dp]
+            baseline = sum(first3_vals) / len(first3_vals) if first3_vals else None
+            baseline_dates = f"{pds[0]}~{pds[min(2,len(pds)-1)]}" if len(pds)>=2 else pds[0]
+            return avg, baseline, baseline_dates, pds[-1] if pds else None
     return None, None, None, None
 
 rows = []; filled = has_chg = 0
@@ -84,21 +87,24 @@ for g in m.get("company_groups", []):
         if st == "external": rem = "当日未提供外部数据"
         elif st == "pending": rem = "数据来源待确认"
         elif avg is None: rem = "数据库中未匹配"
-        elif first is None: rem = "无基准价格"
-        # 该材料的实际数据日期范围写入备注
+        # 标注实际数据范围与涨跌基准日期（统一列头，详情写入备注）
         if avg is not None:
+            parts = []
             if first_d and last_d and first_d != last_d:
-                if not rem: rem = f"数据区间{first_d}~{last_d}"
-                else: rem += f"; 区间{first_d}~{last_d}"
+                parts.append(f"数据区间{first_d}~{last_d}")
             elif last_d:
-                if not rem: rem = f"数据日期{last_d}"
+                parts.append(f"数据日期{last_d}")
+            if first_d:
+                parts.append(f"涨跌基准期{first_d}")
+            if parts:
+                rem = f"{rem}; {'; '.join(parts)}" if rem else "; ".join(parts)
         rows.append({
             "公司": co, "物料属性": e.get("material_attribute", ""),
             "信息类别": e.get("info_category", ""), "化学类型": e.get("chemistry", ""),
             "详细内容": e.get("detail", ""),
             f"期间均价\n({period_start}~{latest})": float(avg) if avg else None,
             "单位": e.get("unit", ""),
-            f"涨跌\n(基准日:{first_d})" if first_d else "涨跌": chg,
+            "涨跌\n(期初→期末)": chg,
             "数据来源": e.get("source", ""), "备注": rem,
         })
 
