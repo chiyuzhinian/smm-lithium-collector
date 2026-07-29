@@ -404,6 +404,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_daily_task.ps1
 | ⚠️ API 优先采集 | prefer_api: true 未实现 |
 | ⚠️ 邮件/消息通知 | 未实现 |
 
+### 材料覆盖缺口（待补充外部数据）
+
+市场价格模板 39 项材料中，SMM 来源 28 项**已全部采集**（部分通过名称映射匹配）。
+以下 **15 项缺失来自非 SMM 来源**，需手动提供：
+
+| 来源 | 缺失项 | 数量 |
+|------|--------|------|
+| **Benchmark** | NCM黑粉（日韩/北美/欧洲） | 3 |
+| **江苏华友客户反馈** | 工商业储能系统(液冷)、小动力电池6020/6030/6050 | 4 |
+| **华宝** | 5系/6系/8系/9系/NCA三元正极材料 | 8 |
+
+> 外部数据放入 `data/external/external_prices.xlsx` 即可自动填充到报表中。
+> 华宝三元材料需确认数据来源后再配置。
+
 ### 已知问题
 
 - pandas `FutureWarning`：空的 DataFrame concat 行为将变化
