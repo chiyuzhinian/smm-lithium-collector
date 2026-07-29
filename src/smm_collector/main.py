@@ -138,6 +138,37 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 	log.info("最终状态=%s 分类=%s db=%s sync=%s",
 	         meta["status"], meta.get("category_counts"), stats,
 	         sync_stats.get("status") if sync_stats else "未执行")
+	# 附加数据源采集（基础金属等）
+	add_meta = {}
+	additional_cfg = cfg.additional_sources
+	if additional_cfg.get("enabled", False) and not dry_run:
+		try:
+			from .additional_sources import collect_source
+			add_sources = additional_cfg.get("items", [])
+			add_continue = additional_cfg.get("continue_on_source_failure", True)
+			add_rows = []
+			for src_cfg in add_sources:
+				try:
+					s_rows, s_meta = await collect_source(
+						page, src_cfg, target_date, stamp, cfg.path("raw_dir"))
+					add_meta[src_cfg.get("code","?")] = s_meta
+					if s_rows:
+						add_rows.extend(s_rows)
+						# 写入SQLite
+						if not dry_run:
+							db.upsert(s_rows)
+						log.info("附加源[%s]: %d行 %s",
+						         src_cfg.get("code"), len(s_rows), s_meta["status"])
+				except Exception as e:
+					add_meta[src_cfg.get("code","?")] = {"status":"failed","error":str(e)}
+					if not add_continue:
+						raise
+			meta["additional_sources"] = add_meta
+			if add_rows:
+				meta["total_clean_rows"] += len(add_rows)
+		except Exception:
+			log.exception("附加数据源采集异常，不影响主流程")
+
 	# 钉钉通知
 	try:
 		from .notifier import send_daily_notification
