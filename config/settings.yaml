@@ -59,6 +59,7 @@ additional_sources:
       market: "SMM基础金属现货"
       url: "https://hq.smm.cn/copper/category/201102250376"
       category: "基础金属"
+      retry_after_minutes: 60     # 铜价发布较晚，60分钟后重试
       selectors:
         table: ".ant-table table"
         row: ".ant-table tbody tr"
@@ -76,6 +77,7 @@ additional_sources:
       market: "SMM基础金属现货"
       url: "https://hq.smm.cn/nickel/category/201102250239"
       category: "基础金属"
+      retry_after_minutes: 60     # 镍价发布较晚，60分钟后重试
       selectors:
         table: ".ant-table table"
         row: ".ant-table tbody tr"

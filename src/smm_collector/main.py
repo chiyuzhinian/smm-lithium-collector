@@ -1,4 +1,4 @@
-"""SMM锂电现货采集主流程 + 附加数据源采集。"""
+"""SMM锂电现货采集主流程 + 附加数据源（含延迟重试）。"""
 from __future__ import annotations
 import argparse, asyncio, json, uuid, re
 from datetime import date, datetime
@@ -33,7 +33,6 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 			await page.screenshot(path=str(diag), full_page=True)
 			(diag.with_suffix(".html")).write_text(await page.content(), encoding="utf-8")
 			raise RuntimeError("登录状态失效")
-		# 构建分类列表
 		if cfg.categories_mode == "manual":
 			all_categories = [c for c in cfg.categories_items if not category or c["name"]==category]
 		else:
@@ -90,39 +89,40 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 	stats = {}; add_meta = {}
 	if not dry_run: stats = db.upsert(rows); db.save_run(meta)
 
-	# 附加数据源（导出之前采集，确保金属入库）
+	# 附加数据源（含延迟重试）
 	additional_cfg = cfg.additional_sources
 	if additional_cfg.get("enabled",False) and not dry_run:
-		try:
-			from .additional_sources import collect_source
-			pw2, br2, ctx2 = await open_browser(cfg, headed)
-			p2 = await ctx2.new_page()
-		except Exception:
-			br2 = None; p2 = page
+		from .additional_sources import collect_source
+		pw2, br2, ctx2 = await open_browser(cfg, headed)
+		p2 = await ctx2.new_page()
 		for src_cfg in additional_cfg.get("items",[]):
 			try:
-				s_rows, s_meta = await collect_source(p2 or page, src_cfg, target_date, stamp, cfg.path("raw_dir"))
+				s_rows, s_meta = await collect_source(p2, src_cfg, target_date, stamp, cfg.path("raw_dir"))
 				add_meta[src_cfg.get("code","?")] = s_meta
-				if s_rows:
-					if not dry_run: db.upsert(s_rows)
-					rows.extend(s_rows)
+				if s_rows: db.upsert(s_rows); rows.extend(s_rows)
 				log.info("附加[%s]: %d行 %s", src_cfg.get("code"), len(s_rows) if s_rows else 0, s_meta["status"])
+				# 延迟重试
+				retry_mins = src_cfg.get("retry_after_minutes", 0)
+				if (not s_rows or s_meta.get("missing")) and retry_mins > 0:
+					log.info("附加[%s]: %d分钟后重试...", src_cfg.get("code"), retry_mins)
+					await asyncio.sleep(retry_mins * 60)
+					s_rows2, s_meta2 = await collect_source(p2, src_cfg, target_date, stamp, cfg.path("raw_dir"))
+					if s_rows2: db.upsert(s_rows2); rows.extend(s_rows2)
+					add_meta[src_cfg.get("code")] = s_meta2
+					log.info("附加[%s]重试: %d行 %s", src_cfg.get("code"), len(s_rows2) if s_rows2 else 0, s_meta2["status"])
 			except Exception as e:
 				log.warning("附加[%s]失败: %s", src_cfg.get("code"), e)
 		meta["additional_sources"] = add_meta
-		if br2: await close_browser(pw2, br2)
+		await close_browser(pw2, br2)
 
 	meta["total_clean_rows"] = len(rows)
-
 	# 导出
 	if rows:
-		rolling_cfg = cfg.settings.get("rolling_price_export",{})
 		try:
+			rolling_cfg = cfg.settings.get("rolling_price_export",{})
 			xlsx, csv = export_daily(rows, meta, cfg.path("export_dir"), target_date, db=db, rolling_config=rolling_cfg)
 			log.info("导出：%s", xlsx)
-		except Exception:
-			log.exception("导出失败，数据已入库")
-
+		except Exception: log.exception("导出失败")
 	# MySQL同步
 	sync_stats = None
 	if not dry_run and rows:
@@ -135,16 +135,12 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 				meta["mysql_sync"] = sync_stats
 				generate_daily_report(meta, sync_stats, cfg.path("export_dir"))
 			except Exception: log.exception("MySQL同步异常")
-
-	log.info("状态=%s 分类=%s db=%s sync=%s", meta["status"], meta.get("category_counts"), stats,
-		sync_stats.get("status") if sync_stats else "未执行")
-
+	log.info("状态=%s db=%s sync=%s", meta["status"], stats, sync_stats.get("status") if sync_stats else "未执行")
 	# 钉钉
 	try:
 		from .notifier import send_daily_notification
 		await send_daily_notification(meta, sync_stats, str(cfg.path("database_path")))
 	except Exception: pass
-
 	return meta
 
 def cli():
