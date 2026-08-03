@@ -101,15 +101,6 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 				add_meta[src_cfg.get("code","?")] = s_meta
 				if s_rows: db.upsert(s_rows); rows.extend(s_rows)
 				log.info("附加[%s]: %d行 %s", src_cfg.get("code"), len(s_rows) if s_rows else 0, s_meta["status"])
-				# 延迟重试
-				retry_mins = src_cfg.get("retry_after_minutes", 0)
-				if (not s_rows or s_meta.get("missing")) and retry_mins > 0:
-					log.info("附加[%s]: %d分钟后重试...", src_cfg.get("code"), retry_mins)
-					await asyncio.sleep(retry_mins * 60)
-					s_rows2, s_meta2 = await collect_source(p2, src_cfg, target_date, stamp, cfg.path("raw_dir"))
-					if s_rows2: db.upsert(s_rows2); rows.extend(s_rows2)
-					add_meta[src_cfg.get("code")] = s_meta2
-					log.info("附加[%s]重试: %d行 %s", src_cfg.get("code"), len(s_rows2) if s_rows2 else 0, s_meta2["status"])
 			except Exception as e:
 				log.warning("附加[%s]失败: %s", src_cfg.get("code"), e)
 		meta["additional_sources"] = add_meta

@@ -1,14 +1,9 @@
-"""附加数据源采集模块。
-
-对配置中 additional_sources 的每个源进行页面采集，提取目标产品价格。
-"""
+"""附加数据源采集模块。"""
 from __future__ import annotations
-import logging, json
-from datetime import date, datetime
+import json, logging, re
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from .parser import parse_html_tables
-from .validator import validate_row
 
 log = logging.getLogger("smm_collector.additional")
 
@@ -28,7 +23,6 @@ async def collect_source(page, source_cfg: dict, target_date: date, stamp: str,
         await page.wait_for_timeout(3000)
 
         html = await page.content()
-        title = await page.title()
 
         # 保存原始数据
         src_dir = raw_dir / source_cfg.get("code", name)
@@ -36,35 +30,14 @@ async def collect_source(page, source_cfg: dict, target_date: date, stamp: str,
         (src_dir / f"page_{stamp}.html").write_text(html, encoding="utf-8")
         await page.screenshot(path=str(src_dir / f"page_{stamp}.png"), full_page=True)
 
-        # 解析所有表格
-        category = source_cfg.get("category", "基础金属")
-        all_rows = parse_html_tables(html, category)
-        log.info("[%s] 解析到 %d 行", name, len(all_rows))
-
-        # 筛选目标产品 - 使用 exact product matching
+        # 筛选目标产品
         collected = []
         for prod_cfg in required:
             canonical = prod_cfg.get("canonical_name", "")
-            aliases = prod_cfg.get("aliases", [canonical])
             if not canonical:
                 continue
 
-            # Find matching row by product name in table
-            matches = [r for r in all_rows
-                       if any(alias in str(r.get("product_name", "")) for alias in aliases)]
-            # Also search raw HTML text for product name
-            if not matches:
-                import re
-                for alias in aliases:
-                    if alias in html:
-                        matches = _extract_from_page(html, alias, canonical, prod_cfg,
-                                                     source_cfg, target_date, html)
-                        break
-
-            if not matches:
-                # Try the historical price table - find today's row
-                matches = _extract_from_historical(html, canonical, prod_cfg,
-                                                   source_cfg, target_date)
+            matches = _extract_from_historical(html, canonical, prod_cfg, source_cfg, target_date)
 
             if matches:
                 meta["found"].append(canonical)
@@ -72,10 +45,6 @@ async def collect_source(page, source_cfg: dict, target_date: date, stamp: str,
             else:
                 meta["missing"].append(canonical)
                 log.warning("[%s] 未找到目标产品: %s", name, canonical)
-
-        # 校验每一行
-        for row in collected:
-            validate_row(row, target_date)
 
         meta["row_count"] = len(collected)
         meta["status"] = "success" if not meta["missing"] else "partial_success"
@@ -90,66 +59,64 @@ async def collect_source(page, source_cfg: dict, target_date: date, stamp: str,
 
 def _extract_from_historical(html: str, canonical: str, prod_cfg: dict,
                              src_cfg: dict, target_date: date) -> list[dict]:
-    """从历史价格表中提取当日价格。"""
+    """从历史价格表中提取最新可用价格。"""
     from bs4 import BeautifulSoup
-    import re
     soup = BeautifulSoup(html, "lxml")
-    tables = soup.find_all("table")
 
-    for table in tables:
-        tbody = table.select_one("tbody")
-        if not tbody:
-            continue
-        rows = tbody.select("tr")
-        for tr in rows:
+    latest_date = None
+    latest_cells = None
+    for table in soup.find_all("table"):
+        for tr in table.select("tbody tr"):
             tds = tr.select("td")
             if len(tds) < 5:
                 continue
             cells = [td.get_text(strip=True) for td in tds]
-            # Check if this is a price data row (date, min, max, avg, change)
             if not re.match(r'\d{4}-\d{2}-\d{2}', cells[0]):
                 continue
-            row_date = cells[0]
-            if row_date != str(target_date) and row_date != target_date.strftime("%Y-%m-%d"):
-                continue
-            # This is today's price row
-            row = {
-                "source": src_cfg.get("source", "SMM"),
-                "market": src_cfg.get("market", "SMM基础金属现货"),
-                "category": src_cfg.get("category", "基础金属"),
-                "product_name": canonical,
-                "specification": prod_cfg.get("specification", ""),
-                "min_price": _dec(cells[1]) if len(cells) > 1 else None,
-                "max_price": _dec(cells[2]) if len(cells) > 2 else None,
-                "average_price": _dec(cells[3]) if len(cells) > 3 else None,
-                "change_value": _dec(cells[4]) if len(cells) > 4 else None,
-                "unit": prod_cfg.get("unit", "元/吨"),
-                "price_date": date.fromisoformat(row_date) if row_date else target_date,
-                "price_date_raw": row_date,
-                "collected_at": datetime.now(),
-                "source_url": src_cfg.get("url", ""),
-                "collection_method": "DOM",
-                "raw_text": " | ".join(cells),
-                "extra_fields": json.dumps({
-                    "material_attribute": prod_cfg.get("material_attribute", ""),
-                    "info_category": prod_cfg.get("info_category", ""),
-                    "chemistry": prod_cfg.get("chemistry", ""),
-                }, ensure_ascii=False),
-            }
-            from .parser import record_hash
-            row["record_hash"] = record_hash(row)
-            row["validation_status"] = "valid"
-            row["validation_message"] = ""
-            return [row]
+            d = cells[0]
+            if latest_date is None or d > latest_date:
+                latest_date = d
+                latest_cells = cells
 
-    return []
+    if not latest_date or not latest_cells:
+        return []
 
+    # 检查最新日期是否在陈旧阈值内
+    stale_days = src_cfg.get("stale_after_days", 5)
+    latest_d = date.fromisoformat(latest_date)
+    if (target_date - latest_d).days > stale_days:
+        log.warning("最新数据日期 %s 超过陈旧阈值 %d 天", latest_date, stale_days)
+        return []
 
-def _extract_from_page(html: str, alias: str, canonical: str, prod_cfg: dict,
-                       src_cfg: dict, target_date: date, raw_html: str) -> list[dict]:
-    """备选：从页面元素提取价格（当表格解析失败时）。"""
-    # Already handled by _extract_from_historical as the primary method
-    return _extract_from_historical(html, canonical, prod_cfg, src_cfg, target_date)
+    cells = latest_cells
+    row = {
+        "source": src_cfg.get("source", "SMM"),
+        "market": src_cfg.get("market", "SMM基础金属现货"),
+        "category": src_cfg.get("category", "基础金属"),
+        "product_name": canonical,
+        "specification": prod_cfg.get("specification", ""),
+        "min_price": _dec(cells[1]) if len(cells) > 1 else None,
+        "max_price": _dec(cells[2]) if len(cells) > 2 else None,
+        "average_price": _dec(cells[3]) if len(cells) > 3 else None,
+        "change_value": _dec(cells[4]) if len(cells) > 4 else None,
+        "unit": prod_cfg.get("unit", "元/吨"),
+        "price_date": latest_d,
+        "price_date_raw": latest_date,
+        "collected_at": datetime.now(),
+        "source_url": src_cfg.get("url", ""),
+        "collection_method": "DOM",
+        "raw_text": " | ".join(cells),
+        "extra_fields": json.dumps({
+            "material_attribute": prod_cfg.get("material_attribute", ""),
+            "info_category": prod_cfg.get("info_category", ""),
+            "chemistry": prod_cfg.get("chemistry", ""),
+        }, ensure_ascii=False),
+    }
+    from .parser import record_hash
+    row["record_hash"] = record_hash(row)
+    row["validation_status"] = "valid"
+    row["validation_message"] = ""
+    return [row]
 
 
 def _dec(val):
