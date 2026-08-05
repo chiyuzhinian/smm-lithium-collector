@@ -73,6 +73,12 @@ def _extract_from_historical(html: str, canonical: str, prod_cfg: dict,
             cells = [td.get_text(strip=True) for td in tds]
             if not re.match(r'\d{4}-\d{2}-\d{2}', cells[0]):
                 continue
+            # 跳过升贴水等非价格表（价格应 > 500 元/吨，升贴水通常 < 500）
+            try:
+                if len(cells) >= 4 and float(cells[3]) < 500:
+                    continue
+            except ValueError:
+                pass
             d = cells[0]
             if latest_date is None or d > latest_date:
                 latest_date = d
