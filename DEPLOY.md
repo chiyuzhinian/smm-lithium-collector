@@ -271,7 +271,150 @@ sudo systemctl status smm-fileserver
 
 ---
 
-## 七、ngrok 内网穿透（可选）
+## 七、历史数据迁移
+
+如果本机已有历史采集数据，需要迁移到服务器。
+
+### 7.1 迁移 SQLite 数据库（推荐）
+
+最简单的方式：把本机 SQLite 数据库文件直接上传到服务器。
+
+**在本机 Windows 上执行：**
+
+```bash
+scp C:\科研\smm_lithium_collector\data\database\smm_lithium.db \
+    root@你的服务器IP:/root/smm-lithium-collector/data/database/
+```
+
+> ⚠️ 如果服务器上已有当天采集的新数据，scp 会直接覆盖。如果两边都有新数据，建议先备份服务器的 .db 文件，然后用下面的 MySQL 同步来合并。
+
+**在服务器上验证：**
+
+```bash
+sqlite3 /root/smm-lithium-collector/data/database/smm_lithium.db \
+  "SELECT price_date, COUNT(*) FROM lithium_spot_prices
+   GROUP BY price_date ORDER BY price_date DESC LIMIT 10"
+```
+
+### 7.2 迁移导出文件（可选）
+
+```bash
+# 上传全部历史 Excel 导出文件
+scp -r C:\科研\smm_lithium_collector\data\exports\ \
+    root@你的服务器IP:/root/smm-lithium-collector/data/exports/
+```
+
+---
+
+## 八、MySQL 安装与数据同步
+
+### 8.1 安装 MySQL Server
+
+```bash
+sudo apt install -y mysql-server
+sudo systemctl enable mysql --now
+sudo mysql_secure_installation
+```
+
+### 8.2 创建数据库和用户
+
+```bash
+sudo mysql -u root
+```
+
+```sql
+CREATE DATABASE IF NOT EXISTS smm_lithium
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE USER IF NOT EXISTS 'smm'@'localhost' IDENTIFIED BY '你的密码';
+
+GRANT ALL PRIVILEGES ON smm_lithium.* TO 'smm'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+### 8.3 配置 .env 中的 MySQL 字段
+
+```bash
+vim /root/smm-lithium-collector/.env
+```
+
+```ini
+# MySQL（启用自动同步）
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=smm
+MYSQL_PASSWORD=你的密码
+MYSQL_DATABASE=smm_lithium
+MYSQL_AUTO_SYNC_AFTER_COLLECTION=true
+```
+
+### 8.4 同步历史数据
+
+```bash
+cd /root/smm-lithium-collector
+
+# 先预览
+.venv/bin/python scripts/sync_to_mysql.py --full --dry-run
+
+# 全量同步
+.venv/bin/python scripts/sync_to_mysql.py --full
+
+# 或按日期范围同步
+.venv/bin/python scripts/sync_to_mysql.py --start-date 2025-11-01 --end-date 2026-08-12
+```
+
+### 8.5 验证 MySQL 数据
+
+```bash
+sudo mysql -u root smm_lithium -e "
+  SELECT price_date, COUNT(*) as cnt
+  FROM smm_price_records
+  GROUP BY price_date
+  ORDER BY price_date DESC
+  LIMIT 10;
+"
+```
+
+### 8.6 数据流架构
+
+```
+本机 Windows                云服务器 Ubuntu
+────────────                ─────────────────────
+smm_lithium.db ──scp──▶   SQLite
+                              │
+                         sync_to_mysql.py (每次采集后自动运行)
+                              │
+                              ▼
+                          MySQL 127.0.0.1:3306
+                          ├── smm_price_records
+                          ├── smm_data_quality_issues
+                          └── smm_sync_runs
+```
+
+日常采集完成后（crontab 9:00），MySQL 同步自动触发（`MYSQL_AUTO_SYNC_AFTER_COLLECTION=true`）。
+
+### 8.7 使用百度云 RDS（可选）
+
+如果不想在服务器上自己装 MySQL，可以使用百度云的云数据库 RDS：
+
+1. 百度云控制台 → 云数据库 RDS → 创建 MySQL 实例
+2. 记下内网地址（如 `rds-xxx.mysql.bj.baidubce.com`）
+3. 在 `.env` 中填入：
+
+```ini
+MYSQL_HOST=rds-xxx.mysql.bj.baidubce.com
+MYSQL_PORT=3306
+MYSQL_USER=smm
+MYSQL_PASSWORD=你的密码
+MYSQL_DATABASE=smm_lithium
+```
+
+> 使用 RDS 时需要在 RDS 白名单中添加云服务器的内网 IP。
+
+---
+
+## 九、ngrok 内网穿透（可选）
 
 如果服务器没有公网 IP，或想用 HTTPS 域名，可安装 ngrok：
 
