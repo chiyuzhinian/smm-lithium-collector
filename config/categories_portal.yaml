@@ -1,0 +1,228 @@
+# ============================================================
+# SMM 锂电价格与回收业务数据中心 — 门户与固定汇总门控统一配置
+# ============================================================
+# 本文件同时驱动：
+#   1) 前端门户（业务分组 A-F、首页指标卡、业务专题、文案）
+#   2) 采集侧固定汇总门控（规范分类全集 + 阈值）
+# 维护方法：
+#   - 页面出现新分类 → 加入 canonical_categories 并归入某 group
+#   - 未归组分类会出现在每日 manifest 的 missing_categories 中提醒维护
+# ============================================================
+
+portal:
+  title: "SMM 锂电价格与回收业务数据中心"
+  subtitle: "聚焦锂电价格、材料价格、基础金属与回收链价格数据，支持每日下载、历史归档与业务分析。"
+  company: "华友"
+
+# ── 规范分类全集（SMM 页面 40 个发现分类；固定汇总门控的判定基准） ──
+# 注意：「基础金属」是附加数据源（铝/铜/镍），进数据但不计入采集成功数
+canonical_categories:
+  - 锂化合物
+  - 锂矿
+  - 锂金属
+  - 钴金属
+  - 钴矿
+  - 钴化合物
+  - 镍化合物
+  - 锰化合物
+  - 正极材料
+  - 人造石墨
+  - 天然石墨负极
+  - 新型负极
+  - 天然石墨
+  - 焦类
+  - 电解液
+  - 溶剂及相关原料
+  - 添加剂
+  - 隔膜
+  - 电芯
+  - 储能电芯
+  - 电池舱
+  - PACK
+  - 磷矿
+  - 磷化工
+  - 铁源
+  - 铝箔
+  - 铜箔
+  - PVDF
+  - 其他辅料
+  - 废旧锂电池
+  - 未注液电芯价格
+  - 未注液卷芯价格
+  - 废旧正极片及系数
+  - 废旧锂电黑粉系数指数
+  - 废旧锂电黑粉系数
+  - 废旧锂电黑粉价格
+  - 梯次回收价格
+  - SMM-五矿锂汇通废旧锂电池
+  - 碳素
+  - 电炉钢
+
+# ── 附加源分类（进文件与汇总数据，但不计入采集成功数） ──
+additional_categories:
+  - category: "基础金属"
+    source: "SMM基础金属现货"
+
+# ── A-F 业务分组（41 个实际分类全覆盖） ──
+groups:
+  A:
+    name: "锂资源与锂盐"
+    description: "锂矿、锂盐及锂金属原料价格"
+    icon: "🔋"
+    categories: [锂矿, 锂化合物, 锂金属]
+  B:
+    name: "正负极材料"
+    description: "正极材料与石墨负极体系价格"
+    icon: "🧱"
+    categories: [正极材料, 人造石墨, 天然石墨, 天然石墨负极, 新型负极]
+  C:
+    name: "电芯与材料"
+    description: "电芯、电池组件及辅材（含未注液品）"
+    icon: "🔌"
+    categories: [电芯, 储能电芯, 电解液, 隔膜, PACK, PVDF, 添加剂,
+                 溶剂及相关原料, 未注液电芯价格, 未注液卷芯价格, 其他辅料]
+  D:
+    name: "基础金属"
+    description: "铜铝镍钴锰铁等金属与化合物价格"
+    icon: "⚙️"
+    categories: [基础金属, 铜箔, 铝箔, 钴金属, 钴矿, 钴化合物,
+                 镍化合物, 锰化合物, 铁源]
+  E:
+    name: "回收链"
+    description: "废旧电池、梯次利用、黑粉与废极片（华友重点）"
+    icon: "♻️"
+    categories: [废旧锂电池, 废旧锂电黑粉价格, 废旧锂电黑粉系数,
+                 废旧锂电黑粉系数指数, 废旧正极片及系数, 梯次回收价格,
+                 SMM-五矿锂汇通废旧锂电池]
+  F:
+    name: "其他"
+    description: "焦类、磷系及行业参考分类"
+    icon: "📦"
+    categories: [焦类, 磷矿, 磷化工, 电池舱, 碳素, 电炉钢]
+
+# ── 固定汇总门控阈值 ──
+# 日期对齐率 = 行中 price_date==target_date 的占比。
+# 注意：页面含周更品种（电芯周/铜箔加工费周等），其行日期天然滞后，
+# 健康同日采集的对齐率实测约 0.74（325/438），次日早采≈0 → 阈值取 0.6 留余量。
+summary_gate:
+  min_date_alignment_ratio: 0.6    # price_date==target 行占比下限
+  max_invalid_ratio: 0.05          # invalid 行占比上限
+
+# ── 首页关键指标卡（12 张；product 为 lithium_spot_prices.product_name 精确值） ──
+metrics:
+  - {key: lce_battery,          name: "电池级碳酸锂",   category: 锂化合物,       product: "电池级碳酸锂",           group: A}
+  - {key: lh_battery,           name: "电池级氢氧化锂", category: 锂化合物,       product: "电池级氢氧化锂（粗颗粒）", group: A}
+  - {key: lfp_cathode,          name: "磷酸铁锂",       category: 正极材料,       product: "磷酸铁锂",               group: B}
+  - {key: ncm523,               name: "三元材料5系",    category: 正极材料,       product: "5系三元材料",            group: B}
+  - {key: lfp_cell,             name: "方形LFP电芯",    category: 电芯,           product: "方形磷酸铁锂电芯(周)",    group: C}
+  - {key: electrolyte,          name: "电解液",         category: 电解液,         product: "电解液",                 group: C}
+  - {key: separator,            name: "隔膜",           category: 隔膜,           product: "隔膜",                   group: C}
+  - {key: copper,               name: "1#电解铜",       category: 基础金属,       product: "1#电解铜",               group: D}
+  - {key: aluminum,             name: "A00铝",          category: 基础金属,       product: "A00铝",                  group: D}
+  - {key: nickel,               name: "1#电解镍",       category: 基础金属,       product: "1#电解镍",               group: D}
+  - {key: waste_lfp_pack,       name: "废旧LFP电池包",  category: 废旧锂电池,     product: "废旧磷酸铁锂铝壳电池包",  group: E}
+  - {key: lfp_powder,           name: "LFP极片粉",      category: 废旧锂电黑粉价格, product: "磷酸铁锂极片粉",         group: E}
+
+# ── 业务专题 ──
+topics:
+  lfp:
+    name: "磷酸铁锂链"
+    icon: "🟢"
+    color: "#16a34a"
+    description: "磷酸铁锂产业链：锂盐 → 磷酸铁锂正极 → 电芯 → 辅材。跟踪储能与动力 LFP 体系核心价格。"
+    categories: [锂化合物, 正极材料, 电芯, 储能电芯, 电解液, 隔膜, 磷矿, 磷化工, 铁源]
+    products:
+      - {category: 锂化合物, product: "电池级碳酸锂"}
+      - {category: 锂化合物, product: "工业级碳酸锂"}
+      - {category: 正极材料, product: "磷酸铁锂"}
+      - {category: 电芯,     product: "方形磷酸铁锂电芯(周)"}
+      - {category: 电解液,   product: "电解液"}
+      - {category: 隔膜,     product: "隔膜"}
+  ternary:
+    name: "三元材料链"
+    icon: "🟠"
+    color: "#f59e0b"
+    description: "三元材料产业链：氢氧化锂/碳酸锂 → 镍钴锰前驱体与正极 → 三元电芯。跟踪 5/6/8/9 系及 NCA 体系。"
+    categories: [锂化合物, 正极材料, 镍化合物, 钴化合物, 钴金属, 锰化合物]
+    products:
+      - {category: 锂化合物, product: "电池级氢氧化锂（粗颗粒）"}
+      - {category: 正极材料, product: "5系三元材料"}
+      - {category: 正极材料, product: "6系三元材料（单晶/动力型）"}
+      - {category: 正极材料, product: "8系三元材料"}
+      - {category: 镍化合物, product: "电池级硫酸镍"}
+      - {category: 钴化合物, product: "SMM硫酸钴指数"}
+      - {category: 钴金属,   product: "电解钴"}
+  base:
+    name: "基础金属链"
+    icon: "🔩"
+    color: "#64748b"
+    description: "基础金属与集流体：铜铝镍钴现货及铜箔铝箔加工费，是电池成本的重要组成。"
+    categories: [基础金属, 铜箔, 铝箔, 钴金属]
+    products:
+      - {category: 基础金属, product: "1#电解铜"}
+      - {category: 基础金属, product: "A00铝"}
+      - {category: 基础金属, product: "1#电解镍"}
+      - {category: 钴金属,   product: "电解钴"}
+      - {category: 铜箔,     product: "锂电铜箔加工费(周)"}
+      - {category: 铝箔,     product: "锂电池铝箔"}
+  recycling:
+    name: "电池回收链"
+    icon: "♻️"
+    color: "#dc2626"
+    emphasis: true
+    description: "华友循环重点业务链：废旧电池 → 拆解/破碎 → 黑粉 → 湿法冶炼，以及梯次利用市场。跟踪废旧锂电池报价、黑粉价格与系数、废正极片及梯次电池价格，配合锂/镍/钴盐价格判断回收冶炼经济性。"
+    categories: [废旧锂电池, 废旧锂电黑粉价格, 废旧锂电黑粉系数, 废旧锂电黑粉系数指数,
+                 废旧正极片及系数, 梯次回收价格, SMM-五矿锂汇通废旧锂电池,
+                 锂化合物, 镍化合物, 钴化合物]
+    products:
+      - {category: 废旧锂电黑粉价格, product: "磷酸铁锂极片粉"}
+      - {category: 废旧锂电黑粉价格, product: "三元523极片粉"}
+      - {category: 废旧锂电黑粉价格, product: "三元电池粉"}
+      - {category: 废旧锂电池,       product: "废旧磷酸铁锂铝壳电池包"}
+      - {category: 梯次回收价格,     product: "方形磷酸铁锂电池B品"}
+      - {category: 废旧正极片及系数, product: "废旧磷酸铁锂动力正极片"}
+
+
+# ── 门户账号与会话（2026-08-13 起：表单登录 + 服务端 Session，替代 HTTP Basic） ──
+# 账号（huayou/admin）与密码哈希保存在 /var/lib/smm-fileserver/auth.db（0600，Web 不可达），
+# 本文件不存任何凭据。初始化/重置：python scripts/init_auth.py
+auth:
+  session_ttl_hours: 10          # 普通用户会话有效期
+  admin_session_ttl_hours: 4     # 管理员会话有效期
+  cookie_secure: false           # 部署 HTTPS 终止层（Nginx 等）后改为 true
+  lockout_max_failures: 5        # 同一账号+IP 连续失败 N 次后锁定
+  lockout_window_minutes: 10     # 失败计数滚动窗口（分钟）
+  lockout_minutes: 10            # 锁定时长（分钟）
+  password_min_length: 8         # 新密码最短长度
+
+# ── 运维健康检查阈值（管理员运维中心使用；统一在此配置，不散落前端） ──
+health:
+  cache_seconds: 30              # overview 聚合缓存（也是前端建议轮询间隔）
+  disk_warn_pct: 80              # 磁盘占用 ≥80% → 警告
+  disk_crit_pct: 90              # ≥90% → 异常
+  mem_warn_pct: 80
+  mem_crit_pct: 90
+  load_warn: 3.0                 # 1 分钟 load average（2 核机器）
+  load_crit: 4.0
+  collector_timeout_minutes: 45  # 采集运行超过该时长 → 警告（只提示不杀进程）
+  freshness_check_hour: 14       # 工作日超过该时点仍未产出当日数据 → 「数据可能未及时更新」警告
+
+# ── 管理员日志查看白名单（{date} 只由服务器时钟推导，绝不接受客户端路径） ──
+admin:
+  log_names:
+    app:        "logs/collector_{date}.log"
+    error:      "logs/error_{date}.log"
+    cron:       "logs/cron.log"
+    metals:     "logs/cron_metals.log"
+    validation: "logs/validation/validation.log"
+  max_log_lines: 200             # 单次最多返回行数
+  log_days_back: 7               # 最多回看天数
+
+# ── 定时任务表（与 scripts/install_cron.sh 保持同步；运维中心「采集任务」页展示） ──
+tasks:
+  - {key: daily,         name: "每日采集(早采)",       cron: "0 10 * * 1-5",  source: manifest_run}
+  - {key: metals,        name: "铜铝镍补采",           cron: "0 11 * * 1-5",  source: metals_log}
+  - {key: noon,          name: "全量兜底(含验证/汇总)", cron: "30 12 * * 1-5", source: manifest_run}
+  - {key: validation,    name: "数据验证",             cron: "",               source: validation_log}
+  - {key: fixed_summary, name: "固定汇总更新",         cron: "",               source: fixed_summary}
+  - {key: mysql_sync,    name: "MySQL 同步",           cron: "",               source: quality_sync}

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>系统运维中心 - SMM 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-page="admin">
+<div id="navbar"></div>
+
+<div class="admin-layout">
+  <aside class="admin-sidebar">
+    <div class="admin-sidebar-title">系统运维中心</div>
+    <div class="admin-sidebar-sub">SMM 数据采集、数据质量与服务器运行状态监控</div>
+    <ul class="admin-nav">
+      <li><a href="#overview" data-tab="overview" class="active">📊 运维总览</a></li>
+      <li><a href="#tasks" data-tab="tasks">🗓 采集任务</a></li>
+      <li><a href="#quality" data-tab="quality">✅ 数据质量</a></li>
+      <li><a href="#resources" data-tab="resources">💻 系统资源</a></li>
+      <li><a href="#logs" data-tab="logs">📜 运行日志</a></li>
+      <li><a href="#security" data-tab="security">🔐 账号安全</a></li>
+    </ul>
+  </aside>
+
+  <main class="admin-main">
+
+    <!-- 运维总览 -->
+    <section class="admin-panel" id="panel-overview">
+      <div class="admin-head">
+        <div>
+          <h1>系统运维中心</h1>
+          <p class="section-note">SMM 数据采集、数据质量与服务器运行状态监控</p>
+        </div>
+        <div class="admin-head-right">
+          <span class="overall-badge" id="overall-badge">加载中…</span>
+          <button class="btn" id="refresh-btn">立即刷新</button>
+          <span class="section-note" id="last-checked"></span>
+        </div>
+      </div>
+
+      <div id="alerts-box"></div>
+      <div class="metric-grid" id="cards-grid"></div>
+
+      <section class="section">
+        <div class="section-title">今日采集状态</div>
+        <div id="today-collection"></div>
+      </section>
+
+      <div class="two-col">
+        <section class="section">
+          <div class="section-title">最近任务</div>
+          <div id="recent-tasks"></div>
+        </section>
+        <section class="section">
+          <div class="section-title">最近异常</div>
+          <div id="recent-errors"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- 采集任务 -->
+    <section class="admin-panel" id="panel-tasks" hidden>
+      <h2>采集任务</h2>
+      <p class="section-note">cron 定时任务（工作日）：10:00 早采 · 11:00 铜铝镍补采 · 12:30 全量兜底（含验证/导出/固定汇总/MySQL 同步）</p>
+      <div id="tasks-table"></div>
+    </section>
+
+    <!-- 数据质量 -->
+    <section class="admin-panel" id="panel-quality" hidden>
+      <h2>数据质量</h2>
+      <p class="section-note" id="quality-date"></p>
+      <div id="quality-box"></div>
+    </section>
+
+    <!-- 系统资源 -->
+    <section class="admin-panel" id="panel-resources" hidden>
+      <h2>系统资源</h2>
+      <p class="section-note">CPU / 内存 / 磁盘 / 运行时间（每张卡片标注最后检查时间，避免陈旧数据误读）</p>
+      <div class="metric-grid" id="resources-grid"></div>
+    </section>
+
+    <!-- 运行日志 -->
+    <section class="admin-panel" id="panel-logs" hidden>
+      <h2>运行日志</h2>
+      <p class="section-note">白名单日志（最多回看 7 天、单次 200 行；不支持任意路径读取）</p>
+      <div class="log-controls">
+        <select id="log-name"></select>
+        <select id="log-day"></select>
+        <button class="btn" id="log-load">加载</button>
+      </div>
+      <div class="log-note" id="log-path"></div>
+      <pre class="log-view" id="log-view">加载中…</pre>
+    </section>
+
+    <!-- 账号安全 -->
+    <section class="admin-panel" id="panel-security" hidden>
+      <h2>账号安全</h2>
+      <div class="two-col">
+        <section class="section">
+          <div class="section-title">修改密码</div>
+          <div class="account-card">
+            <form id="pwd-form">
+              <label for="pwd-current">当前密码</label>
+              <input id="pwd-current" type="password" autocomplete="current-password" required>
+              <label for="pwd-new">新密码（至少 8 位）</label>
+              <input id="pwd-new" type="password" autocomplete="new-password" required minlength="8">
+              <label for="pwd-confirm">确认新密码</label>
+              <input id="pwd-confirm" type="password" autocomplete="new-password" required minlength="8">
+              <div class="login-error" id="pwd-error" hidden></div>
+              <button type="submit" class="btn btn-primary">修改密码</button>
+              <p class="form-hint">修改成功后所有已登录会话将失效，需重新登录。</p>
+            </form>
+          </div>
+        </section>
+        <section class="section">
+          <div class="section-title">最近登录审计</div>
+          <div id="audit-table"></div>
+        </section>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/nav.js"></script>
+<script src="/static/js/admin.js"></script>
+</body>
+</html>

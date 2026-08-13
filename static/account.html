@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>账号安全 - SMM 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-page="account">
+<div id="navbar"></div>
+
+<div class="main-container narrow">
+  <section class="section">
+    <div class="section-title">账号安全</div>
+    <div id="must-change-banner" class="notice notice-warn" hidden>
+      ⚠️ 当前使用初始化密码，请立即修改后才能使用数据门户。
+    </div>
+    <div class="account-card">
+      <p>当前账号：<strong id="acc-username">—</strong>（<span id="acc-role">—</span>）</p>
+      <form id="pwd-form">
+        <label for="pwd-current">当前密码</label>
+        <input id="pwd-current" type="password" autocomplete="current-password" required>
+        <label for="pwd-new">新密码（至少 8 位）</label>
+        <input id="pwd-new" type="password" autocomplete="new-password" required minlength="8">
+        <label for="pwd-confirm">确认新密码</label>
+        <input id="pwd-confirm" type="password" autocomplete="new-password" required minlength="8">
+        <div class="login-error" id="pwd-error" hidden></div>
+        <button type="submit" class="btn btn-primary">修改密码</button>
+        <p class="form-hint">修改成功后所有已登录会话将失效，需重新登录。</p>
+      </form>
+    </div>
+  </section>
+</div>
+
+<div id="footer"></div>
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/nav.js"></script>
+<script src="/static/js/account.js"></script>
+</body>
+</html>

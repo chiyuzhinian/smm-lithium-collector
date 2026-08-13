@@ -7,7 +7,7 @@ from . import __version__
 from .browser import open_browser,close_browser
 from .authentication import looks_logged_out
 from .category_navigator import CategoryNavigator,exhaust_page,discover_categories
-from .config import load_config
+from .config import load_config, load_portal_config
 from .database import Database
 from .exporter import export_daily
 from .logger import setup_logging
@@ -18,10 +18,19 @@ from .validator import validate_row,run_status
 def _safe_filename(name: str) -> str:
 	return re.sub(r'[<>:"/\\|?*\s]+', '_', name.strip())
 
+def _ops_event(event_type: str, level: str, message: str) -> None:
+	"""写运维事件到 auth.db（异常安全，auth.db 故障绝不影响采集结果）。"""
+	try:
+		from .ops_events import write_event
+		write_event(event_type, level, message)
+	except Exception:
+		pass
+
 async def collect(target_date: date, category=None, headed=False, dry_run=False):
 	cfg = load_config(); log = setup_logging(cfg.root)
 	if not cfg.target_url: raise RuntimeError("请在 .env 填写 SMM_TARGET_URL")
 	started = datetime.now(); stamp = started.strftime("%Y-%m-%d_%H%M%S")
+	_ops_event("COLLECTOR_STARTED", "info", f"开始采集 target_date={target_date}")
 	rows = []; pw = browser = context = None
 	try:
 		pw, browser, context = await open_browser(cfg, headed)
@@ -107,13 +116,44 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 		await close_browser(pw2, br2)
 
 	meta["total_clean_rows"] = len(rows)
-	# 导出
+	# 导出（固定汇总门控用规范分类全集 + 阈值；配置缺失时退化为旧逻辑）
+	portal_cfg = load_portal_config(cfg.root)
+	meta["canonical_categories"] = portal_cfg.get("canonical_categories")
+	meta["summary_gate"] = portal_cfg.get("summary_gate")
 	if rows:
 		try:
-			rolling_cfg = cfg.settings.get("rolling_price_export",{})
-			xlsx, csv = export_daily(rows, meta, cfg.path("export_dir"), target_date, db=db, rolling_config=rolling_cfg)
+			xlsx, csv = export_daily(rows, meta, cfg.path("export_dir"), target_date, db=db)
 			log.info("导出：%s", xlsx)
 		except Exception: log.exception("导出失败")
+		try:
+			if meta.get("summary_decision"):
+				from .data_quality import generate_status_manifest
+				generate_status_manifest(meta, rows, meta["summary_decision"], cfg.path("export_dir"))
+				log.info("数据状态manifest已生成 decision=%s", meta["summary_decision"].get("decision"))
+				_ops_event("FIXED_SUMMARY_UPDATED", "info",
+					f"固定汇总 decision={meta['summary_decision'].get('decision')}")
+		except Exception: log.exception("数据状态manifest生成失败")
+		# 每日统一数据验证（后台 9 层，写 logs/validation/；FAIL 只记录，
+		# 固定汇总由门控强制不覆盖正式文件，原始数据永不删除）
+		try:
+			vcfg = cfg.settings.get("validation") or {}
+			if vcfg.get("enabled", True):
+				from .daily_validation import run_daily_validation
+				vres = run_daily_validation(target_date, cfg.path("database_path"),
+				                            cfg.path("export_dir"), portal_cfg, vcfg)
+				meta["daily_validation"] = {"verdict": vres["verdict"],
+				                            "log_file": vres["log_file"]}
+				_ops_event("VALIDATION_VERDICT",
+					"info" if vres["verdict"]=="PASS" else "warning" if vres["verdict"]=="WARNING" else "error",
+					f"数据验证 {vres['verdict']} error={vres['counts']['error']} warning={vres['counts']['warning']}")
+				if vres["verdict"] == "FAIL":
+					head = "；".join(i["message"] for i in vres["issues"]
+					                 if i["level"] == "error")[:500]
+					log.error("每日验证 FAIL: %s", head)
+				else:
+					log.info("每日验证 %s（error=%d warning=%d）", vres["verdict"],
+					         vres["counts"]["error"], vres["counts"]["warning"])
+		except Exception: log.exception("每日验证执行失败")
 	# MySQL同步
 	sync_stats = None
 	if not dry_run and rows:
@@ -132,6 +172,9 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 		from .notifier import send_daily_notification
 		await send_daily_notification(meta, sync_stats, str(cfg.path("database_path")))
 	except Exception: pass
+	_ops_event("COLLECTOR_FINISHED",
+		"info" if meta["status"]=="success" else "warning",
+		f"采集结束 status={meta['status']} rows={meta.get('total_clean_rows')}")
 	return meta
 
 def cli():

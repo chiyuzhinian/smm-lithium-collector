@@ -1,6 +1,6 @@
 # SMM 锂电现货价格每日采集
 
-每天早上一条命令，自动完成：采集 → 清洗 → 校验 → SQLite 入库 → 近三日均价计算 → 两份 Excel 导出 → MySQL 同步 → 钉钉群通知（含下载链接）。
+每天早上一条命令，自动完成：采集 → 清洗 → 校验 → SQLite 入库 → 每日 Excel/CSV 导出 → 数据验证 → MySQL 同步 → 钉钉群通知（含下载链接）。
 
 ## 快速开始
 
@@ -118,7 +118,7 @@ smm_lithium_collector/
 
 | 文件 | 位置 |
 |------|------|
-| 每日 Excel（每分类一个 Sheet，含近三日均价） | `data/exports/YYYY/MM/SMM锂电现货价格_YYYY-MM-DD.xlsx` |
+| 每日 Excel（每分类一个 Sheet） | `data/exports/YYYY/MM/每日汇总/Excel/SMM锂电现货价格_YYYY-MM-DD.xlsx` |
 | 每日 CSV | `data/exports/YYYY/MM/SMM锂电现货价格_YYYY-MM-DD.csv` |
 | 每分类单独 CSV | `data/exports/YYYY/MM/SMM锂电现货价格_钴金属_YYYY-MM-DD.csv` 等 40 个 |
 | 历史累积汇总 | `data/exports/SMM锂电现货价格_历史汇总.xlsx` |
@@ -131,74 +131,14 @@ smm_lithium_collector/
 
 ---
 
-## 近三日价格展示
+## 近三日价格展示（已废弃）
 
-当数据库中存在至少 3 个不同价格日期时，每日 Excel 自动展示最近 3 个实际存在数据的价格日期，并计算每个产品的**近三日均价**。
+> ⚠️ 该产品线已于 2026-08 彻底取消：
+> - 不再生成 `SMM锂电现货价格_近三日对比_*.xlsx` 文件（历史派生文件已清理）
+> - 每日 Excel 不再包含「近三日均价 / 近三日有效天数」列
+> - 相关模块 `src/smm_collector/price_statistics.py` 已删除
+> - 如需窗口期均价分析，请使用历史数据中心检索每日正式文件自行计算
 
-### 日期选择规则
-
-选取 SQLite 中最近 3 个不同的 `price_date`（按自然日不连续也可），例如数据库有 `07-16`、`07-17`、`07-22`，则展示这三天。
-
-### 产品分组
-
-按 `source + market + category + product_name + specification + unit` 六个字段确定同一产品。
-
-### 均价计算
-
-```
-近三日均价 = 同一产品窗口日期内 average_price 之和 ÷ 有效天数
-```
-
-- `valid` 和 `warning` 数据参与计算
-- `invalid` 数据不参与
-- 使用 `Decimal` 精度计算
-
-### 缺失数据
-
-| 有效天数 | 均价 | 说明 |
-|---------|------|------|
-| 3 | 三天平均 | 正常 |
-| 2 | 两天平均 | 产品只有两天有数据 |
-| 1 | 该日价格 | 产品只有一天有数据 |
-| 0 | 空 | 三天全无有效价格 |
-
-### Excel 新增列
-
-| 中文列名 | 说明 |
-|---------|------|
-| 近三日均价 | 同一产品窗口内均价 |
-| 近三日有效天数 | 实际参与计算的天数（1~3） |
-
-同一产品在三个日期行中的**近三日均价一致**（不压缩行）。
-
-### 数据不足三天时
-
-正常导出已有全部日期，均价按现有天数计算，日志提示当前天数。
-
-### 配置
-
-`config/settings.yaml` 中 `rolling_price_export` 节：
-
-```yaml
-rolling_price_export:
-  enabled: true              # 是否开启近N日展示
-  window_days: 3             # 统计窗口天数
-  include_warning_records: true  # warning 参与均价
-  exclude_invalid_records: true  # invalid 不参与均价
-  add_valid_day_count: true      # 输出有效天数列
-```
-
-### CSV 和汇总文件
-
-| 文件 | 含三日均价 |
-|------|:---:|
-| 每日 Excel | ✅ |
-| 每日 CSV | ✅ |
-| 每分类 CSV | ✅ |
-| 历史汇总 Excel | — 保持原字段 |
-| 固定汇总 Excel | — 保持原字段 |
-
----
 
 ## 常用命令
 
@@ -280,8 +220,6 @@ MySQL 中三张表：`smm_price_records`（价格）、`smm_data_quality_issues`
 | price_date | date | 价格日期 |
 | collected_at | datetime | 采集时间 |
 | validation_status | str | valid / warning / invalid |
-| three_day_average_price | Decimal | 近三日均价（Excel 展示用，不存 MySQL） |
-| three_day_valid_count | int | 近三日有效天数（1~3） |
 
 ---
 
@@ -369,6 +307,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_daily_task.ps1
 ```
 
 > 新服务器可以只配 SMM 采集，不需要 MySQL/钉钉，把 `.env` 中对应配置留空即可。
+
+## Linux 服务器门户：账号系统与运维中心
+
+8888 门户（`scripts/file_server.py`）自 2026-08-13 起启用**表单登录 + 服务端 Session**：
+
+- 账号：`huayou`（普通用户）/ `admin`（管理员），初始密码首登强制修改
+- 账号库 `/var/lib/smm-fileserver/auth.db`（PBKDF2 哈希，0600，Web 不可达）；初始化：`.venv/bin/python scripts/init_auth.py`
+- 未登录只能访问 `/login` 与 `/health`；全部页面/API/Excel 下载均需登录；`/admin` 与 `/api/admin/*` 服务端校验管理员角色
+- 管理员运维中心 `/admin`：采集器/验证器/固定汇总/CPU/内存/磁盘/定时任务/日志/审计监控（阈值在 `config/categories_portal.yaml` 的 `auth`/`health`/`admin`/`tasks` 段）
+- systemd 单元需含 `StateDirectory=smm-fileserver` + `StateDirectoryMode=0700`
+- 安全建议：长期生产请加 Nginx + HTTPS 并把 `auth.cookie_secure` 改为 `true`
+
+详见 `SERVER_SETUP.md` 的「账号系统与运维中心」章节。
 
 ## 退出码
 

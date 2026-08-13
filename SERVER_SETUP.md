@@ -11,12 +11,12 @@
 
 | 占位符 | 说明 | 从哪里获取 |
 | ------ | ---- | ---------- |
-| `<服务器公网IP>` | 百度云服务器的公网 IP | `curl -s ifconfig.me` 或百度云控制台 |
-| `<SMM账号>` | SMM 登录手机号 | 本机 `.env` 中的 `SMM_USERNAME` |
-| `<SMM密码>` | SMM 登录密码 | 本机 `.env` 中的 `SMM_PASSWORD` |
-| `<MySQL密码>` | MySQL root 密码 | 建议和本机 `.env` 中 `MYSQL_PASSWORD` 一致 |
-| `<钉钉Webhook>` | 钉钉机器人 Webhook 完整 URL | 本机 `.env` 中的 `DINGTALK_WEBHOOK` |
-| `<钉钉Secret>` | 钉钉机器人签名密钥 | 本机 `.env` 中的 `DINGTALK_SECRET` |
+| `106.12.59.96` | 百度云服务器的公网 IP | `curl -s ifconfig.me` 或百度云控制台 |
+| `18602563579` | SMM 登录手机号 | 本机 `.env` 中的 `SMM_USERNAME` |
+| `<SMM_PASSWORD>` | SMM 登录密码 | 本机 `.env` 中的 `SMM_PASSWORD` |
+| `<MYSQL_PASSWORD>` | MySQL root 密码 | 建议和本机 `.env` 中 `MYSQL_PASSWORD` 一致 |
+| `<DINGTALK_WEBHOOK>` | 钉钉机器人 Webhook 完整 URL | 本机 `.env` 中的 `DINGTALK_WEBHOOK` |
+| `<DINGTALK_SECRET>` | 钉钉机器人签名密钥 | 本机 `.env` 中的 `DINGTALK_SECRET` |
 
 > 本机 `.env` 路径：`C:\科研\smm_lithium_collector\.env`
 
@@ -34,12 +34,12 @@
 /root/smm-lithium-collector/data/exports/                    ← 历史导出文件 (可选)
 ```
 
-如果尚未上传，先在本机 Windows 执行（替换 `<服务器公网IP>`）：
+如果尚未上传，先在本机 Windows 执行（替换 `106.12.59.96`）：
 
 ```bash
-scp "C:\科研\smm_lithium_collector\data\database\smm_lithium.db" root@<服务器公网IP>:/root/smm-lithium-collector/data/database/
-scp "C:\科研\smm_lithium_collector\data\auth\storage_state.json" root@<服务器公网IP>:/root/smm-lithium-collector/data/auth/
-scp -r "C:\科研\smm_lithium_collector\data\exports\*" root@<服务器公网IP>:/root/smm-lithium-collector/data/exports/
+scp "C:\科研\smm_lithium_collector\data\database\smm_lithium.db" root@106.12.59.96:/root/smm-lithium-collector/data/database/
+scp "C:\科研\smm_lithium_collector\data\auth\storage_state.json" root@106.12.59.96:/root/smm-lithium-collector/data/auth/
+scp -r "C:\科研\smm_lithium_collector\data\exports\*" root@106.12.59.96:/root/smm-lithium-collector/data/exports/
 ```
 
 ---
@@ -70,8 +70,8 @@ ls -lh data/auth/storage_state.json
 ```bash
 cat > .env << 'ENVEOF'
 # SMM 采集
-SMM_USERNAME=<SMM账号>
-SMM_PASSWORD=<SMM密码>
+SMM_USERNAME=18602563579
+SMM_PASSWORD=<SMM_PASSWORD>
 SMM_LOGIN_URL=https://user.smm.cn/login
 SMM_TARGET_URL=https://new-energy.smm.cn/new_energy/14042
 SMM_HEADLESS=true
@@ -81,7 +81,7 @@ SMM_TIMEOUT=30000
 MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
 MYSQL_USER=root
-MYSQL_PASSWORD=<MySQL密码>
+MYSQL_PASSWORD=<MYSQL_PASSWORD>
 MYSQL_DATABASE=smm_lithium
 MYSQL_CHARSET=utf8mb4
 MYSQL_CONNECT_TIMEOUT=10
@@ -92,11 +92,11 @@ MYSQL_AUTO_CREATE_DATABASE=true
 MYSQL_AUTO_SYNC_AFTER_COLLECTION=true
 
 # 钉钉通知
-DINGTALK_WEBHOOK=<钉钉Webhook>
-DINGTALK_SECRET=<钉钉Secret>
+DINGTALK_WEBHOOK=<DINGTALK_WEBHOOK>
+DINGTALK_SECRET=<DINGTALK_SECRET>
 
 # 文件下载（填服务器公网IP）
-FILE_HOST=http://<服务器公网IP>:8888
+FILE_HOST=http://106.12.59.96:8888
 ENVEOF
 ```
 
@@ -115,7 +115,7 @@ sudo systemctl enable mysql --now
 
 # 设置 root 密码
 sudo mysql -u root << 'SQL'
-ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '<MySQL密码>';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '<MYSQL_PASSWORD>';
 FLUSH PRIVILEGES;
 SQL
 ```
@@ -125,7 +125,7 @@ SQL
 ## 步骤 4：创建 SMM 数据库
 
 ```bash
-mysql -u root -p'<MySQL密码>' << 'SQL'
+mysql -u root -p'<MYSQL_PASSWORD>' << 'SQL'
 CREATE DATABASE IF NOT EXISTS smm_lithium
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -166,7 +166,7 @@ SQLite读取: 1634
 
 ```bash
 # 验证 MySQL 数据
-mysql -u root -p'<MySQL密码>' smm_lithium -e "
+mysql -u root -p'<MYSQL_PASSWORD>' smm_lithium -e "
   SELECT price_date, COUNT(*) as cnt
   FROM smm_price_records
   GROUP BY price_date
@@ -196,7 +196,7 @@ sudo systemctl status smm-fileserver
 .venv/bin/python -c "
 import asyncio
 from smm_collector.notifier import send_dingtalk
-asyncio.run(send_dingtalk('🚀 SMM采集服务器部署成功', '服务已就绪，明天起每日9:00自动采集'))
+asyncio.run(send_dingtalk('🚀 SMM采集服务器部署成功', '服务已就绪，每个工作日10:00/12:30自动采集、11:00铜铝镍补采'))
 " && echo "钉钉消息发送成功" || echo "钉钉消息发送失败，请检查 .env 中的 DINGTALK_WEBHOOK 和 DINGTALK_SECRET"
 ```
 
@@ -211,7 +211,7 @@ asyncio.run(send_dingtalk('🚀 SMM采集服务器部署成功', '服务已就�
 - [ ] `--full` 同步成功，MySQL 中有历史数据
 - [ ] `--dry-run` 试运行成功
 - [ ] 文件服务器正常运行（端口 8888）
-- [ ] `curl http://<服务器公网IP>:8888/` 可外网访问
+- [ ] `curl http://106.12.59.96:8888/` 可外网访问
 - [ ] 钉钉群收到测试消息
 - [ ] `crontab -l` 确认定时任务已安装
 
@@ -227,15 +227,113 @@ bash scripts/run_daily.sh
 tail -f logs/collector_$(date +%Y-%m-%d).log
 
 # 查看 MySQL 同步状态
-mysql -u root -p'<MySQL密码>' smm_lithium -e "
+mysql -u root -p'<MYSQL_PASSWORD>' smm_lithium -e "
   SELECT sync_status, COUNT(*) FROM smm_sync_runs
   GROUP BY sync_status;
 "
 
 # 登录过期时，在本机重新登录后上传：
-# scp "C:\科研\smm_lithium_collector\data\auth\storage_state.json" root@<服务器公网IP>:/root/smm-lithium-collector/data/auth/
+# scp "C:\科研\smm_lithium_collector\data\auth\storage_state.json" root@106.12.59.96:/root/smm-lithium-collector/data/auth/
 
-# Cron 定时任务
-# 周一至周五 9:00  全量采集 + MySQL 同步 + 钉钉通知
+# Cron 定时任务（由 scripts/install_cron.sh 安装管理）
+# 周一至周五 10:00 全量采集 + MySQL 同步 + 钉钉通知（早采，发布早时当日入库）
 # 周一至周五 11:00 铜铝镍延迟补采
+# 周一至周五 12:30 全量兜底重跑（SMM 发布时间不固定，当日数据未发布则靠这次兜底）
 ```
+
+---
+
+## 门户与固定汇总运维
+
+### 门户页面
+
+- 首页 `/`：今日必看 / 关键指标 / 专题入口 / 最近更新 / 固定汇总状态
+- 今日价格 `/today`、历史数据中心 `/history`、业务专题 `/topics`（回收链重点）、数据质量 `/quality`
+- API：`/api/overview`、`/api/latest`、`/api/history`、`/api/categories`、`/api/trends`、`/api/quality`、`/api/topics`
+
+### 重启门户
+
+```bash
+systemctl restart smm-fileserver        # 服务以 smmweb 非特权用户运行
+journalctl -u smm-fileserver -n 30      # 查看日志
+```
+
+### 更新页面文案与分类映射
+
+页面文案、业务分组（A-F）、首页指标卡、专题产品清单、门控阈值**全部**在 `config/categories_portal.yaml` 中维护（文件 mtime 变化后门户自动热加载，无需重启）。
+
+页面出现新分类时：加入 `canonical_categories` 并归入某 `groups` 组，否则每日 manifest 的 `missing_categories` 会持续提示。
+
+### 每日数据状态 manifest
+
+每次采集（无论 MySQL 同步是否开启）都会生成：
+`data/exports/{年}/{月}/每日汇总/SMM数据状态_{日期}.json`
+含：预期/成功/失败分类数、缺失分类名单、行级质量统计、日期对齐率、当日全部 runs、固定汇总决策（`updated_formal` / `temp_snapshot` / `skipped`）与原因。
+
+### 固定汇总更新规则
+
+- 正式固定汇总（`固定汇总/SMM锂电现货价格_固定汇总.xlsx`）仅在当日运行**同时满足**时更新：
+  1. 成功分类 ⊇ 规范分类全集（40 个）
+  2. 日期对齐率 ≥ 0.6（price_date==当日 行占比；防"页面还在显示昨天价格"）
+  3. invalid 行占比 ≤ 0.05
+- 不满足时生成**临时快照**：`固定汇总/临时快照/SMM锂电现货价格_固定汇总_临时_{日期}.xlsx`，不覆盖正式文件。
+
+### 从 SQLite 重建汇总（发现汇总文件异常时）
+
+```bash
+.venv/bin/python scripts/rebuild_summaries.py --dry-run      # 只打印统计与门控复核
+.venv/bin/python scripts/rebuild_summaries.py                # 重建历史汇总 + 正式固定汇总
+.venv/bin/python scripts/rebuild_summaries.py --fix-gaps     # 并补缺口日导出 + 刷新 manifest
+```
+
+### 安全
+
+- 文件服务以 `smmweb` 非特权用户运行（systemd 加固：NoNewPrivileges/ProtectSystem=strict/PrivateTmp）
+- 权限由 `bash scripts/secure_fileserver.sh` 维护（可重复执行）
+- Web 可访问范围仅限 `data/exports` 与 `static/`，`.env`/登录态/源码不可下载
+
+---
+
+## 账号系统与运维中心（2026-08-13 上线）
+
+### 账号体系
+
+- **表单登录 + 服务端 Session**（替代原 HTTP Basic 单账号）。密码只存 PBKDF2-SHA256 哈希，
+  账号库 `/var/lib/smm-fileserver/auth.db`（0600，smmweb 属主，Web 不可达）
+- 账号：`huayou`（普通用户）/ `admin`（管理员）。**初始密码首次登录强制修改**
+- 会话有效期：普通用户 10h / 管理员 4h（滑动续期）；改密后全部会话失效需重新登录
+- 防爆破：同一账号+IP 10 分钟内失败 5 次 → 锁定 10 分钟（可配置）
+- 未登录访问任何页面/API/文件下载都会被重定向到 `/login`；管理员路径 `/admin`、`/api/admin/*` 由服务端校验角色，普通用户一律 403
+
+### 初始化 / 重置账号
+
+```bash
+.venv/bin/python scripts/init_auth.py            # 交互输入两个账号的初始密码（幂等，已存在则跳过）
+.venv/bin/python scripts/init_auth.py --reset    # 重置两个账号密码并强制首登改密
+```
+
+### systemd 单元要求
+
+单元必须包含（`scripts/setup_systemd.sh` 模板已内置，线上单元手工比对）：
+
+```ini
+StateDirectory=smm-fileserver
+StateDirectoryMode=0700
+```
+
+### 运维中心 `/admin`（仅管理员）
+
+- 运维总览：总体状态（正常/警告/异常）+ Web 服务 / SMM 采集器 / 最新业务数据 / 数据验证 /
+  固定汇总 / 磁盘 / 内存 / CPU 卡片（每卡标注最后检查时间）+ 今日采集状态 + 最近任务 + 最近异常
+- 采集任务 / 数据质量（验证 9 层人类可读化）/ 系统资源 / 运行日志（白名单，回看 7 天）/
+  账号安全（改密 + 登录审计）
+- 30 秒轮询 + 「立即刷新」；阈值与规则统一在 `config/categories_portal.yaml` 的 `auth` / `health` / `admin` / `tasks` 段
+- 健康检查端点 `GET /health` 公开可用（无敏感信息），可做外部探活
+
+### 安全提示
+
+- 当前为 HTTP 明文访问。**长期生产建议 Nginx + HTTPS** 终止 TLS，并将
+  `config/categories_portal.yaml` 中 `auth.cookie_secure` 改为 `true`
+- 管理员后台仅提供查看与诊断能力，无 Shell / 任意命令 / 任意文件 / SQL 接口
+- 日志轮转：当前应用日志无自动轮转，建议后续新增 `/etc/logrotate.d/smm-collector`
+  （logs/*.log 按天保留 30 天）

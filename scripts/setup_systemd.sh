@@ -24,16 +24,27 @@ MODE="${1:-install}"
 
 FILESERVER_SERVICE="smm-fileserver"
 FILESERVER_UNIT="[Unit]
-Description=SMM File Server (端口8888)
+Description=SMM 锂电价格与回收业务数据中心门户 (端口8888)
 After=network.target
 
 [Service]
 Type=simple
-User=root
+User=smmweb
+Group=smmweb
 WorkingDirectory=${ROOT}
 ExecStart=${ROOT}/.venv/bin/python ${ROOT}/scripts/file_server.py
 Restart=always
 RestartSec=10
+# 账号库可写目录（ProtectSystem=strict 下唯一可写路径；自动创建并归属 smmweb）
+StateDirectory=smm-fileserver
+StateDirectoryMode=0700
+# 安全加固：禁止提权、私有 /tmp、只读文件系统视图（不遮 /root，服务需要读数据目录）
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
 
 [Install]
 WantedBy=multi-user.target"
@@ -125,6 +136,7 @@ case "$MODE" in
     install)
         echo "安装 systemd 服务..."
         install_service "$FILESERVER_SERVICE" "$FILESERVER_UNIT"
+        echo -e "${YELLOW}[提示]${NC} 请确保已运行 bash scripts/secure_fileserver.sh 完成权限加固"
 
         # ngrok：仅当 ngrok 二进制存在时安装
         if [ -f "${ROOT}/ngrok" ]; then
