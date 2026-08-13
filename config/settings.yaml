@@ -15,6 +15,19 @@ output:
   screenshot_dir: "data/screenshots"
   database_path: "data/database/smm_lithium.db"
 browser: {headless: true, timeout_ms: 30000, slow_mo_ms: 0}
+
+# ── 每日统一数据验证（后台，结果写 logs/validation/，不对外展示） ──
+# 9 层检查：文件/结构/日期/重复/缺失分类/数值/波动/历史连续性/固定汇总一致性
+# 判定：FAIL（每日文件损坏/为空、核心字段缺失、日期完全错误、核心分类全部缺失、
+#       当日全部行未通过数值校验）；WARNING（其余问题，仅记录不删除数据）
+validation:
+  enabled: true
+  volatility_warning_pct: 20.0   # |日变化| > 20% → warning（仅提示，不拒绝数据）
+  volatility_error_pct: 100.0    # > 100% → 仍只记 warning
+  continuity_window_days: 10     # 历史连续性检查窗口（价格日数）
+  max_report_items: 20           # 每个告警最多记录明细条数
+  log_dir: "logs/validation"     # 验证日志目录（不在 Web 根，不对公网开放）
+  category_overrides: {}         # 按分类覆盖波动阈值，如 {锂化合物: {warning_pct: 15.0}}
 collector:
   max_retries: 3
   retry_base_seconds: 3
@@ -24,13 +37,6 @@ collector:
   continue_on_category_failure: true
   require_all_categories_for_success: true
   max_scroll_attempts: 30
-rolling_price_export:
-  enabled: true                # 是否开启近N日展示
-  window_days: 3               # 统计窗口天数
-  use_distinct_price_dates: true  # 使用最近N个实际存在的价格日期
-  include_warning_records: true   # warning数据参与均价计算
-  exclude_invalid_records: true   # invalid数据不参与均价计算
-  add_valid_day_count: true       # 是否输出近三日有效天数列
 additional_sources:
   enabled: true                # 是否采集附加数据源
   continue_on_source_failure: true  # 单个源失败不影响其他

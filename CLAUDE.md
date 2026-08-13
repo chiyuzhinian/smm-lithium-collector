@@ -56,7 +56,6 @@ C:\科研\smm_lithium_collector/
 │   ├── cleaner.py                # normalize_str/unit + parse_decimal() + parse_price_date()
 │   ├── validator.py              # validate_row() + check_price_volatility() + run_status()
 │   ├── database.py               # Database 类：SQLite schema、upsert、save_run + 多日查询
-│   ├── price_statistics.py       # 产品分组 + 近N日日期选择 + Decimal均价计算
 │   ├── exporter.py               # export_daily() Excel/CSV 导出 + 近N日展示 + 历史/固定汇总
 │   ├── mysql_database.py         # MySQL 连接/建表/批量upsert/异常记录/同步记录
 │   ├── synchronizer.py           # SQLite→MySQL 同步编排 + 数据分类 + 重试 + 质量跟踪
@@ -145,7 +144,7 @@ C:\科研\smm_lithium_collector/
 │ 6. 存储和导出                                                   │
 │    ├── Database.upsert() → SQLite（去重/更新）                   │
 │    ├── SQLite 查询最近 3 个价格日期                                 │
-│    ├── 产品分组 + 近三日 Decimal 均价计算                          │
+│    ├── 每日 Excel/CSV 导出（动态分类Sheet + 中文列名）             │
 │    ├── export_daily() → Excel + CSV（动态分类Sheet + 中文列名）    │
 │    ├── 历史汇总更新（仅 status==success，保持原字段）               │
 │    └── 固定汇总更新（仅全部发现分类完整成功时）                     │
@@ -210,14 +209,11 @@ C:\科研\smm_lithium_collector/
 - **smm_data_quality_issues** — 数据质量异常记录（warning/error，可追溯）
 - **smm_sync_runs** — 同步批次记录（running/success/partial_success/failed）
 
-### Excel 导出字段（含近三日统计）
+### Excel 导出字段
 
-原有 19 列 + 新增 2 列：
+19 列标准字段（source/market/category/product_name/specification/min_price/max_price/average_price/change_value/unit/price_date/collected_at/source_url/collection_method/raw_text/extra_fields/record_hash/validation_status/validation_message）。
 
-| 列 | 中文名 | 说明 |
-|----|-------|------|
-| `three_day_average_price` | 近三日均价 | 同产品窗口内均价，仅 Excel 展示 |
-| `three_day_valid_count` | 近三日有效天数 | 1~3，说明用几天数据计算的均价 |
+> 注：原「近三日对比」产品线已于 2026-08 废弃（不再生成 `近三日对比_*.xlsx`，`price_statistics.py` 已删除）。
 
 ### 导出 Excel Sheet（动态）
 
@@ -278,8 +274,19 @@ python scripts/backfill.py --start-date 2026-07-01 --end-date 2026-07-22
 # 运行测试
 pytest -q
 
-# 安装每日定时任务
-powershell -ExecutionPolicy Bypass -File .\scripts\install_daily_task.ps1
+# 安装每日定时任务（Linux 服务器）
+bash scripts/install_cron.sh        # 10:00 全量采集 + 11:00 铜铝镍补采 + 12:30 全量兜底
+
+# 数据门户（服务器 8888 端口，smmweb 非特权用户运行）
+#   首页 / 今日价格 /today / 历史数据 /history / 业务专题 /topics（回收链重点）/ 数据质量 /quality
+#   公网可达，HTTP Basic 鉴权（2026-08-13 起启用）：账号/密码哈希在 config/categories_portal.yaml 的 portal_auth 段
+#   改密码: python -c "import hashlib;print(hashlib.sha256(input().encode()).hexdigest())" 替换 password_sha256
+#   临时关闭: portal_auth.enabled=false（仅限确认门户只在内网可达时）
+# 重启: systemctl restart smm-fileserver
+
+# 从 SQLite 重建历史汇总 + 固定汇总（发现汇总异常时）
+.venv/bin/python scripts/rebuild_summaries.py --dry-run
+.venv/bin/python scripts/rebuild_summaries.py --fix-gaps
 ```
 
 ### 退出码
@@ -373,8 +380,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_daily_task.ps1
 | ✅ 数据清洗 | Decimal 转换、千分位、日期推导（跨年）、字符串标准化、Unicode 规范化 |
 | ✅ 数据校验 | 价格逻辑、日间波动检测、必填字段、日期异常、负数检测 |
 | ✅ SQLite 存储 | 业务唯一键去重，价格变化更新，locked 重试 |
-| ✅ 近三日均价 | 从 SQLite 查询最近 3 个价格日期，同产品分组计算 Decimal 均价 |
-| ✅ Excel 导出 | 动态分类 Sheet、中文列名、近三日均价、近三日有效天数 |
+| ✅ Excel 导出 | 动态分类 Sheet、中文列名 |
+| ❌ 近三日对比（已废弃） | 2026-08 下线：文件/代码/配置/文档已删除 |
 | ✅ CSV 导出 | 每日总 CSV + 每分类单独 CSV |
 | ✅ 历史汇总 + 固定汇总 | 自动累积去重，三分类全部成功时更新 |
 | ✅ MySQL 同步 | 自动建库建表、批量 upsert (record_hash)、3 表结构 |
@@ -387,12 +394,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_daily_task.ps1
 | ✅ 测试 | **74 个测试**全部通过 |
 | ✅ 重试机制 | SQLite locked 重试 + MySQL 同步 3 次重试 |
 | ✅ 配置化 | settings.yaml 控制分类模式、同步、近N日窗口等 |
+| ✅ 数据门户 | 8888 门户：今日必看/指标卡/四专题/历史中心/质量面板 + 7 个 API |
+| ✅ 固定汇总门控 | 规范全集比对 + 日期对齐率 + invalid 阈值；不达标写临时快照不覆盖正式文件 |
+| ✅ 每日 manifest | SMM数据状态_{日期}.json（无条件生成，含缺失分类/对齐率/固定汇总决策） |
+| ✅ 汇总重建脚本 | rebuild_summaries.py 从 SQLite 全量重建 + 缺口日回补 |
+| ✅ 安全加固 | 路径穿越修复 + 非特权 smmweb 运行 + systemd 沙箱 |
 
 ### 数据现状
 
 - SQLite：**1634 条记录**，覆盖 **2025-11 至 2026-07**，40 个分类
 - MySQL：三张表自动同步
-- 每日 Excel：自动展示最近 3 个价格日期的近三日均价
+- 每日 Excel：按分类 Sheet 展示当日全量数据（近三日对比已废弃）
 
 ### 未完成
 
@@ -421,5 +433,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_daily_task.ps1
 ### 已知问题
 
 - pandas `FutureWarning`：空的 DataFrame concat 行为将变化
-- 没有 Git 仓库
 - `.pytest_cache` 写入权限问题（不影响测试）
+- SMM 发布时间不固定（10:00~12:30），正式固定汇总依赖 12:30 兜底运行，偶尔可能当日未更新（次日自然补上）
+- 门控阈值（对齐率 0.6 / invalid 0.05）为初值，观察一周 manifest 后可校准（config/categories_portal.yaml）

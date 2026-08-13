@@ -11,4 +11,7 @@ __pycache__/
 .pytest_tmp/
 .venv/
 *.py[cod]
+*.egg-info/
+*.swp
+data/backups/
 ngrok.exe

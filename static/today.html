@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日价格 · SMM 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-page="today">
+<div id="navbar"></div>
+
+<div class="main-container">
+
+  <section class="section">
+    <div class="page-head">
+      <div>
+        <div class="section-title" style="margin-bottom:0">今日价格</div>
+        <div class="page-date" id="page-date">加载中…</div>
+      </div>
+      <div class="page-actions" id="page-actions"></div>
+    </div>
+    <div id="completeness-banner"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-title">今日各板块重点指标</div>
+    <div class="metric-grid" id="metric-grid"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-title">涨跌排行</div>
+    <div class="rank-wrap" id="rank-wrap"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-title">按分类查看今日文件</div>
+    <div class="toolbar">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="cat-search" placeholder="搜索分类，例如：锂化合物、回收">
+      </div>
+      <div class="filter-tags" id="group-chips"></div>
+    </div>
+    <div class="cat-file-grid" id="cat-file-grid"></div>
+  </section>
+
+</div>
+
+<div id="footer"></div>
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/echarts.min.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/nav.js"></script>
+<script src="/static/js/today.js"></script>
+</body>
+</html>

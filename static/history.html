@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>历史数据中心 · SMM 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-page="history">
+<div id="navbar"></div>
+
+<div class="main-container">
+
+  <section class="section">
+    <div class="page-head">
+      <div>
+        <div class="section-title" style="margin-bottom:0">历史数据中心</div>
+        <div class="page-date">历史归档覆盖 2026-07-21 起，可检索每日总表与分类 CSV，并支持历史趋势查看</div>
+      </div>
+      <div class="page-actions" id="history-summary-btns"></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="toolbar">
+      <label class="date-range-label">数据日期
+        <input type="date" id="date-from">
+        <span class="date-sep">～</span>
+        <input type="date" id="date-to">
+      </label>
+      <select class="sort-select" id="group-select" style="max-width:150px">
+        <option value="">全部分组</option>
+      </select>
+      <select class="sort-select" id="category-select" style="max-width:190px">
+        <option value="">全部分类</option>
+      </select>
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="搜索，例如：碳酸锂、黑粉、废旧锂电池、2026-08-12">
+      </div>
+      <a class="btn btn-outline" href="/topics#recycling">📈 历史趋势图入口 →</a>
+    </div>
+    <div class="file-table-wrap">
+      <table class="file-table">
+        <thead>
+          <tr>
+            <th>文件名称</th><th>数据日期</th><th>类型</th><th>分类</th><th>业务分组</th><th>大小</th><th>文件更新时间</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="file-tbody">
+          <tr><td colspan="8"><div class="empty-state"><div class="empty-icon">⏳</div><div>加载中…</div></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pager" id="pager"></div>
+    <div class="result-count" id="result-count"></div>
+  </section>
+
+</div>
+
+<div id="footer"></div>
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/echarts.min.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/nav.js"></script>
+<script src="/static/js/history.js"></script>
+</body>
+</html>

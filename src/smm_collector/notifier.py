@@ -65,13 +65,10 @@ def build_report_message(meta, sync_stats=None):
     if sync_stats:
         lines.append(f"**MySQL**：新增{sync_stats.get('inserted',0)} 更新{sync_stats.get('updated',0)}")
 
-    # 两个下载链接
+    # 下载链接（近三日对比产品线已于 2026-08 废弃）
     dl1 = _dl_url(td, f"SMM锂电现货价格_{td}.xlsx")
-    dl2 = _dl_url(td, f"SMM锂电现货价格_近三日对比_{td}.xlsx")
     if dl1:
         lines.append(f"\n📥 [下载当日全部数据]({dl1})")
-    if dl2:
-        lines.append(f"📥 [下载近三日对比及均价]({dl2})")
     lines.append(f"\n⏰ {datetime.now().strftime('%H:%M')}")
     return "\n".join(lines)
 

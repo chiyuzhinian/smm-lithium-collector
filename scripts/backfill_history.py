@@ -273,7 +273,6 @@ async def backfill(target_category: str | None = None, dry_run: bool = False):
             xlsx, csv_dir = export_daily(
                 all_rows, meta, cfg.path("export_dir"), today,
                 db=db,
-                rolling_config=cfg.settings.get("rolling_price_export", {}),
             )
             print(f"  导出: {xlsx}")
         except OSError as e:

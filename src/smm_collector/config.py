@@ -38,6 +38,19 @@ class AppConfig:
     def path(self, key: str) -> Path:
         return self.root / self.settings["output"][key]
 
+def load_portal_config(root: Path | None = None) -> dict:
+    """读取门户+固定汇总门控统一配置 config/categories_portal.yaml。
+
+    文件不存在时返回空 dict（门控退化为旧逻辑，不影响采集）。
+    """
+    root = (root or Path(__file__).resolve().parents[2]).resolve()
+    path = root / "config" / "categories_portal.yaml"
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
 def load_config(root: Path | None = None) -> AppConfig:
     root = (root or Path(__file__).resolve().parents[2]).resolve()
     load_dotenv(root / ".env")

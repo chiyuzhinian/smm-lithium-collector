@@ -1,7 +1,6 @@
-"""每日Excel/CSV导出 + 规范日报 + 近三日对比。"""
+"""每日Excel/CSV导出 + 规范日报。"""
 from __future__ import annotations
 import logging, os, re
-from collections import defaultdict
 from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
@@ -42,39 +41,156 @@ def _style(path):
 	wb.save(path)
 
 
-def _build_wide_table(db, config, target_date_str, log_ref):
-	if not db or not config.get("enabled", True): return None, None
-	window_days = config.get("window_days", 3)
-	exclude_invalid = config.get("exclude_invalid_records", True)
-	total_dates = db.get_distinct_price_date_count()
-	dates = db.get_latest_price_dates(window_days)
-	if not dates: return None, None
-	dates_sorted = sorted(dates)
-	records = db.get_records_by_price_dates(dates_sorted, exclude_invalid=exclude_invalid)
-	if not records: return None, None
-	from .price_statistics import product_key, compute_rolling_average
-	groups = defaultdict(list)
-	for r in records: groups[product_key(r)].append(r)
-	wide_rows = []; f3 = t2 = o1 = z0 = 0
-	for key, grp in groups.items():
-		r0 = grp[0]
-		row = {"分类": r0.get("category",""), "品名": r0.get("product_name",""),
-		       "规格": r0.get("specification",""), "单位": r0.get("unit","")}
-		for d in dates_sorted:
-			dr = [r for r in grp if str(r.get("price_date","")) == d]
-			row[f"{d[5:]}均价"] = dr[0].get("average_price") if dr else None
-		avg, cnt = compute_rolling_average(grp, dates_sorted, include_warning=True, exclude_invalid=exclude_invalid)
-		row["近三日均价"] = avg; row["有效天数"] = cnt
-		if cnt >= 3: f3 += 1
-		elif cnt == 2: t2 += 1
-		elif cnt == 1: o1 += 1
-		else: z0 += 1
-		wide_rows.append(row)
-	log_ref.info("Products: %d full3:%d two:%d one:%d zero:%d", len(wide_rows), f3, t2, o1, z0)
-	return wide_rows, dates_sorted
+SUMMARY_KEYS = ["source", "market", "category", "product_name", "specification", "unit", "price_date"]
+_STATUS_RANK = {"valid": 0, "warning": 1, "invalid": 2}
 
 
-def export_daily(rows, meta, export_root: Path, target_date, db=None, rolling_config=None):
+def _dedup_quality(rows: list[dict]) -> list[dict]:
+	"""质量感知去重：同业务键多行时优先 valid，其次 warning，同级取 collected_at 最新。
+
+	修复历史汇总/固定汇总 keep="last" 导致坏数据覆盖好数据的问题。
+	"""
+	if not rows:
+		return []
+	df = pd.DataFrame(rows)
+	for c in ("collected_at", "validation_status"):
+		if c not in df.columns:
+			df[c] = None
+	df["_rank"] = df["validation_status"].map(lambda s: _STATUS_RANK.get(s, 2))
+	df["_ts"] = pd.to_datetime(df["collected_at"], errors="coerce")
+	keys = [k for k in SUMMARY_KEYS if k in df.columns]
+	df = (df.sort_values(["_rank", "_ts"], ascending=[True, False])
+	        .drop_duplicates(subset=keys, keep="first")
+	        .drop(columns=["_rank", "_ts"]))
+	return df.to_dict("records")
+
+
+def build_summary_dataframe(db_rows: list[dict]) -> pd.DataFrame:
+	"""过滤 invalid 行 + 质量感知去重，供增量更新与重建脚本共用。"""
+	kept = [r for r in db_rows if r.get("validation_status") != "invalid"]
+	kept = _dedup_quality(kept)
+	df = pd.DataFrame(kept)
+	for c in COLUMNS:
+		if c not in df.columns:
+			df[c] = None
+	return df[COLUMNS].sort_values(["category", "product_name", "price_date"])
+
+
+def _write_fixed_summary(merged: pd.DataFrame, target_date, path: Path, status_text: str):
+	"""写固定汇总（正式或临时快照）：全部数据 + 每分类 Sheet + 采集说明。"""
+	tmp = path.with_suffix(".tmp.xlsx")
+	mc = _sorted_cats(merged["category"])
+	cs = "、".join(mc[:5]) + ("…等" if len(mc) > 5 else "")
+	with pd.ExcelWriter(tmp, engine="openpyxl") as writer:
+		merged.to_excel(writer, index=False, sheet_name="全部数据")
+		for cat in mc:
+			merged[merged.category == cat].to_excel(writer, index=False, sheet_name=_excel_sheet_name(cat))
+		pd.DataFrame({"项目": ["数据来源", "最后更新日期", "数据范围", "采集状态"],
+		              "内容": ["SMM", str(target_date), cs, status_text]}
+		).to_excel(writer, index=False, sheet_name="采集说明")
+	_style(tmp)
+	os.replace(tmp, path)
+
+
+def update_summaries(rows, meta, export_root: Path, target_date,
+                     canonical_categories=None, gate=None) -> dict:
+	"""固定汇总门控 + 历史汇总/固定汇总更新（含临时快照）。
+
+	门控规则（canonical_categories 提供时）：
+	  - missing = canonical - success：对照规范分类全集，而非当日 discover 集合
+	  - 日期对齐率 = price_date==target_date 行占比（同日采集→valid，次日早采→warning）
+	  - 达标 → 质量去重后更新历史汇总 + 正式固定汇总（decision=updated_formal）
+	  - 不达标但有行 → 写 固定汇总/临时快照/，不动正式文件（decision=temp_snapshot）
+	  - 无行 → skipped
+	canonical_categories 为 None 时兼容旧调用方（按 meta.status 走旧门，质量去重仍生效）。
+	"""
+	canonical = list(canonical_categories) if canonical_categories is not None else None
+	gate = gate or {}
+	min_align = float(gate.get("min_date_alignment_ratio", 0.8))
+	max_invalid = float(gate.get("max_invalid_ratio", 0.05))
+
+	success_set = set(meta.get("success_categories", []))
+	n = len(rows)
+	align_ratio = invalid_ratio = None
+	reasons: list[str] = []
+
+	if canonical is None:
+		# 旧调用方兼容：按 meta.status 判定
+		if meta.get("status") != "success":
+			return {"decision": "skipped", "eligible": False, "missing_categories": [],
+			        "extra_categories": [], "align_ratio": None, "invalid_ratio": None,
+			        "reasons": ["status != success（旧门控）"], "formal_status": "异常",
+			        "temp_snapshot_path": None}
+		missing: list[str] = []
+		extra: list[str] = []
+	else:
+		missing = sorted(set(canonical) - success_set)
+		extra = sorted(success_set - set(canonical))
+		if missing:
+			head = "、".join(missing[:8]) + ("…" if len(missing) > 8 else "")
+			reasons.append(f"缺失分类 {len(missing)} 个: {head}")
+
+	if n:
+		invalid_n = sum(1 for r in rows if r.get("validation_status") == "invalid")
+		align_n = sum(1 for r in rows if str(r.get("price_date", "")) == str(target_date))
+		invalid_ratio = invalid_n / n
+		align_ratio = align_n / n
+		if align_ratio < min_align:
+			reasons.append(f"日期对齐率 {align_ratio:.1%} 低于阈值 {min_align:.0%}")
+		if invalid_ratio > max_invalid:
+			reasons.append(f"invalid 行占比 {invalid_ratio:.1%} 超过阈值 {max_invalid:.0%}")
+
+	if n == 0:
+		return {"decision": "skipped", "eligible": False, "missing_categories": missing,
+		        "extra_categories": extra, "align_ratio": None, "invalid_ratio": None,
+		        "reasons": reasons or ["无数据行"], "formal_status": "异常",
+		        "temp_snapshot_path": None}
+
+	eligible = (not missing) and align_ratio >= min_align and invalid_ratio <= max_invalid
+	decision = "updated_formal" if eligible else "temp_snapshot"
+	result = {
+		"decision": decision,
+		"eligible": eligible,
+		"missing_categories": missing,
+		"extra_categories": extra,
+		"align_ratio": round(align_ratio, 4),
+		"invalid_ratio": round(invalid_ratio, 4),
+		"reasons": reasons,
+		"formal_status": None,
+		"temp_snapshot_path": None,
+	}
+
+	if decision == "updated_formal":
+		# 历史汇总：增量合并 + 全量质量感知去重
+		history = export_root / "SMM锂电现货价格_历史汇总.xlsx"
+		base_df = build_summary_dataframe(rows)
+		old = pd.read_excel(history) if history.exists() else pd.DataFrame(columns=COLUMNS)
+		merged = _dedup_quality(pd.concat([old, base_df], ignore_index=True).to_dict("records"))
+		merged = pd.DataFrame(merged)[COLUMNS]
+		htmp = history.with_suffix(".tmp.xlsx")
+		merged.to_excel(htmp, index=False)
+		_style(htmp)
+		os.replace(htmp, history)
+		# 正式固定汇总
+		fixed_dir = export_root / "固定汇总"
+		fixed_dir.mkdir(parents=True, exist_ok=True)
+		fixed = fixed_dir / "SMM锂电现货价格_固定汇总.xlsx"
+		_write_fixed_summary(merged, target_date, fixed, f"共{len(success_set)}个分类完整成功")
+		result["formal_status"] = "完整"
+		result["formal_file_path"] = "固定汇总/SMM锂电现货价格_固定汇总.xlsx"
+	else:
+		# 临时快照：不覆盖正式固定汇总
+		snap_dir = export_root / "固定汇总" / "临时快照"
+		snap_dir.mkdir(parents=True, exist_ok=True)
+		snap = snap_dir / f"SMM锂电现货价格_固定汇总_临时_{target_date}.xlsx"
+		_write_fixed_summary(build_summary_dataframe(rows), target_date, snap,
+		                     f"临时快照（成功 {len(success_set)}/{len(canonical) if canonical else '?'} 分类，仅供参考）")
+		result["formal_status"] = "部分" if success_set else "异常"
+		result["temp_snapshot_path"] = f"固定汇总/临时快照/{snap.name}"
+	return result
+
+
+def export_daily(rows, meta, export_root: Path, target_date, db=None):
 	out = export_root / f"{target_date:%Y}" / f"{target_date:%m}"
 	out.mkdir(parents=True, exist_ok=True)
 	summary_dir = out / "每日汇总"; summary_dir.mkdir(parents=True, exist_ok=True)
@@ -121,45 +237,11 @@ def export_daily(rows, meta, export_root: Path, target_date, db=None, rolling_co
 	except Exception:
 		log.exception("规范日报生成失败")
 
-	# Excel 2: 近三日对比
-	wide_rows, window_dates = _build_wide_table(db, rolling_config or {}, str(target_date), log)
-	stem3 = f"SMM锂电现货价格_近三日对比_{target_date}"
-	xlsx3 = excel_dir / f"{stem3}.xlsx"; tmp3 = xlsx3.with_suffix(".tmp.xlsx")
-	if wide_rows:
-		df_wide = pd.DataFrame(wide_rows)
-		dc = [c for c in df_wide.columns if "均价" in c and "近三日" not in c]
-		ordered = ["分类","品名","规格","单位"] + dc + ["近三日均价","有效天数"]
-		df_wide = df_wide[[c for c in ordered if c in df_wide.columns]]
-		df_wide = df_wide.sort_values(["分类","品名"]).reset_index(drop=True)
-		with pd.ExcelWriter(tmp3, engine="openpyxl") as writer:
-			df_wide.to_excel(writer, index=False, sheet_name="全部数据")
-			for cat in sorted(df_wide["分类"].unique()):
-				df_wide[df_wide["分类"]==cat].to_excel(writer, index=False, sheet_name=_excel_sheet_name(cat))
-			pd.DataFrame({"项目":["数据来源","采集日期","窗口日期","产品数"],
-				"内容":["SMM",str(target_date),"、".join(window_dates or []),f"{len(wide_rows)}个"]}
-			).to_excel(writer, index=False, sheet_name="采集说明")
-		_style(tmp3); os.replace(tmp3, xlsx3)
-
-	# 历史汇总 + 固定汇总
-	if meta.get("status") == "success":
-		history = export_root / "SMM锂电现货价格_历史汇总.xlsx"
-		base_df = df_raw.copy()
-		old = pd.read_excel(history) if history.exists() else pd.DataFrame(columns=COLUMNS)
-		merged = pd.concat([old, base_df], ignore_index=True).drop_duplicates(
-			subset=["source","market","category","product_name","specification","unit","price_date"], keep="last")
-		htmp = history.with_suffix(".tmp.xlsx"); merged.to_excel(htmp, index=False); _style(htmp); os.replace(htmp, history)
-		fixed_dir = export_root / "固定汇总"; fixed_dir.mkdir(parents=True, exist_ok=True)
-		fixed = fixed_dir / "SMM锂电现货价格_固定汇总.xlsx"; fixed_tmp = fixed.with_suffix(".tmp.xlsx")
-		mc = _sorted_cats(merged["category"]); sc = len(meta.get("success_categories",[]))
-		cs = "、".join(mc[:5]) + ("…等" if len(mc)>5 else "")
-		with pd.ExcelWriter(fixed_tmp, engine="openpyxl") as writer:
-			merged.to_excel(writer, index=False, sheet_name="全部数据")
-			for cat in mc:
-				merged[merged.category==cat].to_excel(writer, index=False, sheet_name=_excel_sheet_name(cat))
-			pd.DataFrame({"项目":["数据来源","最后更新日期","数据范围","采集状态"],
-				"内容":["SMM",str(target_date),cs,f"共{sc}个分类完整成功"]}
-			).to_excel(writer, index=False, sheet_name="采集说明")
-		_style(fixed_tmp); os.replace(fixed_tmp, fixed)
+	# 历史汇总 + 固定汇总（门控决策；canonical/gate 由 meta 传入，缺省走旧门兼容）
+	meta["summary_decision"] = update_summaries(
+		rows, meta, export_root, target_date,
+		canonical_categories=meta.get("canonical_categories"),
+		gate=meta.get("summary_gate"))
 
 	# OneDrive
 	onedrive = os.getenv("ONEDRIVE_EXPORT_DIR","")

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMM 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-page="home">
+<div id="navbar"></div>
+
+<div class="main-container">
+
+  <!-- Banner -->
+  <section class="banner">
+    <h1>SMM 锂电价格与回收业务数据中心</h1>
+    <p class="banner-desc">聚焦锂电价格、材料价格、基础金属与回收链价格数据，支持每日下载、历史归档与业务分析。</p>
+    <div class="banner-chart">
+      <svg viewBox="0 0 200 60">
+        <polyline fill="none" stroke="white" stroke-width="1.5"
+          points="0,45 20,35 40,38 60,20 80,25 100,10 120,15 140,5 160,12 180,3 200,8"/>
+        <polyline fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1"
+          points="0,50 20,42 40,48 60,30 80,35 100,20 120,28 140,15 160,22 180,12 200,18"/>
+      </svg>
+    </div>
+  </section>
+
+  <!-- 今日必看（第一优先级） -->
+  <section class="section" id="today">
+    <div class="section-title">🔴 今日必看</div>
+    <div class="today-card" id="today-card">
+      <div class="empty-state"><div class="empty-icon">⏳</div><div>加载中…</div></div>
+    </div>
+  </section>
+
+  <!-- 关键指标快览 -->
+  <section class="section">
+    <div class="section-title">关键指标快览 <span class="section-note">今日值 · 较昨日变化 · 近7日趋势 · 更新时间</span></div>
+    <div class="metric-grid" id="metric-grid"></div>
+  </section>
+
+  <!-- 业务专题入口 -->
+  <section class="section">
+    <div class="section-title">业务专题</div>
+    <div class="topic-grid" id="topic-grid"></div>
+  </section>
+
+  <!-- 最近 7 天价格数据 + 固定汇总状态 -->
+  <div class="two-col">
+    <section class="section">
+      <div class="section-title">最近 7 天价格数据 <span class="section-note">按数据业务日期</span></div>
+      <div class="recent-list" id="recent-list"></div>
+    </section>
+    <section class="section">
+      <div class="section-title">固定汇总状态</div>
+      <div id="fixed-summary"></div>
+    </section>
+  </div>
+
+</div>
+
+<div id="footer"></div>
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/echarts.min.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/nav.js"></script>
+<script src="/static/js/home.js"></script>
+</body>
+</html>

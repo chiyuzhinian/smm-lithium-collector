@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据质量 · SMM 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-page="quality">
+<div id="navbar"></div>
+
+<div class="main-container">
+
+  <section class="section">
+    <div class="section-title">数据质量面板</div>
+    <div class="quality-today" id="quality-today"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-title">固定汇总状态</div>
+    <div class="quality-fixed" id="quality-fixed"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-title">近 14 日采集质量明细</div>
+    <div class="file-table-wrap">
+      <table class="file-table">
+        <thead>
+          <tr>
+            <th>日期</th><th>采集状态</th><th>成功/预期分类</th><th>是否入正式固定汇总</th><th>固定汇总状态</th>
+          </tr>
+        </thead>
+        <tbody id="quality-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-title">数据缺口清单</div>
+    <div class="gaps-list" id="gaps-list"></div>
+  </section>
+
+</div>
+
+<div id="footer"></div>
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/echarts.min.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/nav.js"></script>
+<script src="/static/js/quality.js"></script>
+</body>
+</html>
