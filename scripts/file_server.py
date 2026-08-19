@@ -589,6 +589,203 @@ def _metrics(latest_db_date: str | None) -> list[dict]:
     return out
 
 
+# ── 首页「重点产品价格」模块 ─────────────────────────────
+# 数据真实性要求：全部价格/日期/涨跌只来自 lithium_spot_prices 真实记录；
+# 产品身份 = (category, product_name, specification) 精确三元组（绝不用模糊名称匹配）；
+# 7d/30d 窗口只含 DB 真实存在的日期，周末/节假日/采集缺口一律不补点。
+
+def _key_product_defs() -> list[dict]:
+    """config key_products 段：有序展示产品定义（key 唯一、db 至少 1 个三元组）。
+
+    非法条目（缺 key、db 为空、key 重复）跳过并忽略；specification 缺失按空串精确匹配。
+    """
+    cfg = _portal_config()
+    defs: list[dict] = []
+    seen: set[str] = set()
+    for e in cfg.get("key_products") or []:
+        key = str(e.get("key") or "")
+        db = e.get("db") or []
+        if not key or key in seen or not db:
+            continue
+        seen.add(key)
+        defs.append({
+            "key": key,
+            "display_name": str(e.get("display_name") or key),
+            "full_name": str(e.get("full_name") or e.get("display_name") or key),
+            "business_category": str(e.get("business_category") or "未分类"),
+            "subcategory": str(e.get("subcategory") or ""),
+            "order": int(e.get("order") or 0) if str(e.get("order") or "").lstrip("-").isdigit() else 0,
+            "db": [{"category": str(t.get("category") or ""),
+                    "product_name": str(t.get("product_name") or ""),
+                    "specification": str(t.get("specification") or "")} for t in db
+                   if t.get("category") and t.get("product_name")],
+        })
+    return defs
+
+
+def _key_product_rows() -> tuple[list[dict], dict]:
+    """一次查询取回全部 key_products 三元组的合法行。
+
+    返回 (defs, by_triple)：by_triple[(category, product_name, specification)] 为按
+    price_date 升序的行列表；同一 (三元, 日期) 只留 collected_at 最新（同刻取 id 大者，
+    与 verify_data_consistency._DAY_AVG_SQL 口径一致）。DB 不可用或配置为空 → ([], {})。
+    """
+    defs = _key_product_defs()
+    if not defs:
+        return [], {}
+    conds, params = [], []
+    triples = []
+    for e in defs:
+        for t in e["db"]:
+            conds.append("(category = ? AND product_name = ? AND specification = ?)")
+            params.extend([t["category"], t["product_name"], t["specification"]])
+            triples.append((t["category"], t["product_name"], t["specification"]))
+    sql = ("SELECT category, product_name, specification, unit, price_date, "
+           "average_price, min_price, max_price, collected_at "
+           "FROM lithium_spot_prices WHERE validation_status != 'invalid' "
+           f"AND ({' OR '.join(conds)}) "
+           "ORDER BY price_date, collected_at DESC, id DESC")
+    rows = _db_query(sql, tuple(params))
+    by_triple: dict = {}
+    for r in rows:
+        key = (r["category"], r["product_name"], r["specification"])
+        seq = by_triple.setdefault(key, [])
+        if seq and seq[-1]["price_date"] == r["price_date"]:
+            continue  # 同一日期只留 collected_at 最新行（已按降序排序）
+        seq.append(r)
+    for seq in by_triple.values():
+        seq.reverse()  # 升序
+    return defs, by_triple
+
+
+def _key_product_series(e: dict, by_triple: dict) -> list[dict]:
+    """一个展示产品 → 一条按 price_date 升序的合并序列。
+
+    1..n 个 DB 三元组合并（规格改名对在改名日边界天然连续）；average_price 为 NULL
+    的点跳过（绝不填充）。每点保留真实 unit/collected_at 供卡片与校验追溯。
+    """
+    pts: list[dict] = []
+    for t in e["db"]:
+        for r in by_triple.get((t["category"], t["product_name"], t["specification"]), []):
+            v = _num(r.get("average_price"))
+            if v is None:
+                continue
+            pts.append({"price_date": str(r["price_date"]),
+                        "value": v,
+                        "unit": str(r.get("unit") or ""),
+                        "collected_at": _fmt_ts(r.get("collected_at"))})
+    pts.sort(key=lambda p: p["price_date"])
+    return pts
+
+
+def _key_product_card(e: dict, pts: list[dict], db_latest: str | None) -> dict:
+    """单卡数据（口径与 _metrics 一致）。
+
+    - value = 最新真实日期的 average_price；prev = 同一合并序列上一条真实记录（跨改名对）
+    - change_pct = (value - prev) / prev × 100；无 prev 或 prev=0 → None
+    - spark_points = 最新数据日期往前 7 个自然日窗口内的真实点 [{date, value}]
+      （逐点可追溯到 DB；周末/节假日/采集缺口天然缺席，绝不补点）
+    - 数据日期(price_date) 与 更新时间(collected_at) 分开；is_stale 沿用全局口径
+    - 无任何数据 → value/change/change_pct/price_date/updated_at 全 None
+    """
+    card = {
+        "key": e["key"], "display_name": e["display_name"], "full_name": e["full_name"],
+        "business_category": e["business_category"], "subcategory": e["subcategory"],
+        "value": None, "unit": "", "change": None, "change_pct": None,
+        "prev_date": None, "price_date": None, "updated_at": None, "is_stale": False,
+        "spark_points": [], "has_history": len(pts) >= 2,
+    }
+    if not pts:
+        return card
+    latest = pts[-1]
+    prev = pts[-2] if len(pts) >= 2 else None
+    card["value"] = round(latest["value"], 4)
+    card["unit"] = latest["unit"] or (prev["unit"] if prev else "")
+    card["price_date"] = latest["price_date"]
+    card["updated_at"] = latest["collected_at"]
+    card["is_stale"] = _is_stale(latest["price_date"], db_latest)
+    # 一周趋势 = 最新数据日期往前 7 个自然日窗口内的真实点（非最近 7 个记录）
+    spark_from = None
+    try:
+        from datetime import timedelta
+        spark_from = (datetime.strptime(latest["price_date"], "%Y-%m-%d")
+                      - timedelta(days=6)).strftime("%Y-%m-%d")
+    except ValueError:
+        spark_from = None
+    card["spark_points"] = [{"date": p["price_date"], "value": round(p["value"], 4)}
+                            for p in pts if spark_from is None or p["price_date"] >= spark_from]
+    if prev is not None:
+        card["prev_date"] = prev["price_date"]
+        card["change"] = round(card["value"] - prev["value"], 4)
+        if prev["value"]:
+            card["change_pct"] = round(card["change"] / prev["value"] * 100, 2)
+    return card
+
+
+def _key_products_payload() -> dict:
+    """GET /api/key-products 响应体（模块级纯函数，verify 脚本可直接调用）。
+
+    按配置顺序组装 business_category → subcategory → products 分组，另附扁平
+    products 列表供前端搜索。全部 20 卡一次返回（首页不做每产品独立请求）。
+    """
+    defs, by_triple = _key_product_rows()
+    db_latest = _db_latest_date()
+    products = [_key_product_card(e, _key_product_series(e, by_triple), db_latest) for e in defs]
+    by_key = {p["key"]: p for p in products}
+    groups: list[dict] = []
+    for e in defs:
+        p = by_key.get(e["key"])
+        if p is None:
+            continue
+        g = next((x for x in groups if x["key"] == e["business_category"]), None)
+        if g is None:
+            g = {"key": e["business_category"], "name": e["business_category"], "subcategories": []}
+            groups.append(g)
+        sub = next((x for x in g["subcategories"] if x["key"] == e["subcategory"]), None)
+        if sub is None:
+            sub = {"key": e["subcategory"], "name": e["subcategory"], "products": []}
+            g["subcategories"].append(sub)
+        sub["products"].append(p)
+    return {
+        "meta": {"generated_at": datetime.now().isoformat(timespec="seconds"), "source": "sqlite"},
+        "groups": groups,
+        "products": products,
+    }
+
+
+def _key_product_history_payload(key: str, range_str: str = "30d") -> dict:
+    """GET /api/key-products/history 响应体（按需加载，不进首页 payload）。
+
+    range 仅接受 7d|30d（默认 30d）；窗口 = 该产品最新真实价格日期往前 6/29 天，
+    只返回窗口内 DB 真实存在的日期（缺口/周末天然缺席，绝不补点）。
+    """
+    if range_str not in ("7d", "30d"):
+        range_str = "30d"
+    days = 7 if range_str == "7d" else 30
+    defs, by_triple = _key_product_rows()
+    e = next((x for x in defs if x["key"] == key), None)
+    if e is None:
+        return {"error": "未知产品 key", "data": []}
+    pts = _key_product_series(e, by_triple)
+    latest_date = pts[-1]["price_date"] if pts else None
+    date_from = None
+    if latest_date:
+        try:
+            from datetime import timedelta
+            date_from = (datetime.strptime(latest_date, "%Y-%m-%d")
+                         - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        except ValueError:
+            date_from = None
+    data = [{"date": p["price_date"], "price": round(p["value"], 4)}
+            for p in pts if date_from is None or p["price_date"] >= date_from]
+    unit = pts[-1]["unit"] if pts else ""
+    return {
+        "key": key, "display_name": e["display_name"], "unit": unit,
+        "range": range_str, "latest_date": latest_date, "date_from": date_from,
+        "data": data,
+    }
+
+
 def _rankings(limit: int = 5, as_of: str | None = None) -> dict:
     """涨跌榜：as_of 基准日之前 DB 最近两个有数据日期的相邻价格变化。
 
@@ -1097,6 +1294,10 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_json(self._api_categories())
         elif path == "/api/trends":
             self._serve_json(self._api_trends(parse_qs(urlsplit(self.path).query)))
+        elif path == "/api/key-products":
+            self._serve_json(self._api_key_products(parse_qs(urlsplit(self.path).query)))
+        elif path == "/api/key-products/history":
+            self._serve_json(self._api_key_product_history(parse_qs(urlsplit(self.path).query)))
         elif path == "/api/quality":
             self._serve_json(self._api_quality())
         elif path == "/api/topics":
@@ -1550,6 +1751,16 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             "primary": {"product": primary["product"], "unit": primary["unit"],
                         "last_7d_change_pct": change, "valid_points": len(pts)},
         }
+
+    def _api_key_products(self, q: dict) -> dict:
+        """首页「重点产品价格」：全部产品卡（最新价/较上次/近7日真实点/双日期）一次返回。"""
+        return _key_products_payload()
+
+    def _api_key_product_history(self, q: dict) -> dict:
+        """产品趋势详情：按需加载 7d/30d 窗口内 DB 真实价格点（缺口不补）。"""
+        key = (q.get("key") or [""])[0]
+        range_str = (q.get("range") or ["30d"])[0]
+        return _key_product_history_payload(key, range_str)
 
     def _api_quality(self) -> dict:
         manifests = _all_manifests()

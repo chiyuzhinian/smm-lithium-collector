@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>锂电价格与回收业务数据中心</title>
-<link rel="stylesheet" href="/static/css/style.css">
+<link rel="stylesheet" href="/static/css/style.css?v=20260819">
 </head>
 <body data-page="home">
 <div id="navbar"></div>
@@ -33,10 +33,20 @@
     </div>
   </section>
 
-  <!-- 关键指标快览 -->
+  <!-- 重点产品价格（首页核心模块：全部数据来自数据库真实记录） -->
   <section class="section">
-    <div class="section-title">关键指标快览 <span class="section-note">今日值 · 较昨日变化 · 近7日趋势 · 更新时间</span></div>
-    <div class="metric-grid" id="metric-grid"></div>
+    <div class="section-title">重点产品价格 <span class="section-note">最新价 · 较上次变化 · 近7日真实趋势 · 数据日期/更新时间</span></div>
+    <div class="kp-toolbar">
+      <div class="kp-tabs" id="kp-tabs">
+        <button class="kp-tab active" data-tab="all">全部</button>
+        <button class="kp-tab" data-tab="回收">回收</button>
+        <button class="kp-tab" data-tab="正极材料">正极材料</button>
+      </div>
+      <input id="kp-search" type="search" placeholder="搜索产品名称 / 规格…">
+    </div>
+    <div class="kp-body" id="kp-body">
+      <div class="empty-state"><div class="empty-icon">⏳</div><div>加载中…</div></div>
+    </div>
   </section>
 
   <!-- 业务专题入口 -->
@@ -62,10 +72,30 @@
 <div id="footer"></div>
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/echarts.min.js"></script>
-<script src="/static/js/api.js"></script>
-<script src="/static/js/charts.js"></script>
-<script src="/static/js/nav.js"></script>
-<script src="/static/js/home.js"></script>
+<!-- 产品趋势弹窗（近7天/近30天真实价格，按需加载） -->
+<div class="modal-overlay" id="kp-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="产品趋势">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="kp-modal-title"></div>
+        <div class="modal-sub" id="kp-modal-sub"></div>
+      </div>
+      <button class="modal-close" id="kp-modal-close" aria-label="关闭">×</button>
+    </div>
+    <div class="range-toggle">
+      <button class="range-btn active" data-range="7d">近7天</button>
+      <button class="range-btn" data-range="30d">近30天</button>
+    </div>
+    <div class="chart-box" id="kp-chart" data-chart></div>
+    <div class="modal-foot" id="kp-modal-foot"></div>
+  </div>
+</div>
+
+<script src="/static/js/echarts.min.js?v=20260819"></script>
+<script src="/static/js/api.js?v=20260819"></script>
+<script src="/static/js/charts.js?v=20260819"></script>
+<script src="/static/js/nav.js?v=20260819"></script>
+<script src="/static/js/home.js?v=20260819"></script>
+<script src="/static/js/keyproducts.js?v=20260819"></script>
 </body>
 </html>

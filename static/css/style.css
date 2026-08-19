@@ -756,6 +756,81 @@ body {
 .gap-date { font-weight: 700; color: #b45309; min-width: 90px; }
 .gap-reason { font-size: 0.82rem; color: #92400e; }
 
+/* ── 首页「重点产品价格」模块 ─────────────────────────── */
+.kp-toolbar {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.9rem;
+}
+.kp-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.kp-tab {
+  padding: 0.5rem 1.25rem; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--card-bg); cursor: pointer; font-size: 0.88rem; font-weight: 600;
+  color: var(--text-secondary); transition: all var(--transition);
+}
+.kp-tab:hover { border-color: var(--primary-light); color: var(--primary); }
+.kp-tab.active {
+  background: var(--primary); color: #fff; border-color: transparent;
+  box-shadow: var(--shadow-md);
+}
+#kp-search {
+  padding: 0.55rem 1rem; border: 1.5px solid var(--border); border-radius: 10px;
+  font-size: 0.88rem; background: var(--card-bg); color: var(--text);
+  outline: none; max-width: 280px; min-width: 0;
+  transition: border var(--transition);
+}
+#kp-search:focus { border-color: var(--primary-light); }
+.kp-subcat {
+  display: flex; align-items: baseline; gap: 0.5rem; margin: 1.1rem 0 0.5rem;
+  font-size: 0.92rem; font-weight: 700; color: var(--primary);
+}
+.kp-subcat .count { font-size: 0.72rem; font-weight: 400; color: var(--text-secondary); }
+.kp-grid { margin-bottom: 0.2rem; }
+.kp-card { display: flex; flex-direction: column; }
+.kp-card .metric-spark { flex: 0 0 auto; }
+.kp-card .kp-trend-btn { margin-top: 0.55rem; width: 100%; text-align: center; }
+.kp-card .kp-trend-btn:disabled {
+  opacity: 0.45; cursor: not-allowed;
+  background: var(--border); border-color: var(--border); color: var(--text-secondary);
+}
+
+/* ── 产品趋势弹窗 ─────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+}
+.modal-overlay[hidden] { display: none; }
+.modal {
+  width: min(720px, 100%); max-height: 86vh; overflow: auto;
+  background: var(--card-bg); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg, 0 20px 50px rgba(15, 23, 42, 0.25));
+  padding: 1.2rem 1.4rem;
+}
+.modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.modal-title { font-size: 1.1rem; font-weight: 800; color: var(--text); }
+.modal-sub { font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.25rem; line-height: 1.5; }
+.modal-close {
+  border: none; background: none; font-size: 1.5rem; line-height: 1;
+  color: var(--text-secondary); cursor: pointer; padding: 0.1rem 0.4rem;
+}
+.modal-close:hover { color: var(--text); }
+.range-toggle { display: flex; gap: 0.5rem; margin: 0.9rem 0 0.6rem; }
+.range-btn {
+  padding: 0.35rem 1.1rem; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--bg); cursor: pointer; font-size: 0.82rem; font-weight: 600;
+  color: var(--text-secondary); transition: all var(--transition);
+}
+.range-btn.active { background: var(--primary); color: #fff; border-color: transparent; }
+.modal .chart-box { height: 300px; }
+.modal-foot { margin-top: 0.6rem; font-size: 0.78rem; color: var(--text-secondary); }
+
+@media (max-width: 640px) {
+  .kp-toolbar { flex-direction: column; align-items: stretch; }
+  #kp-search { max-width: 100%; }
+  .modal { width: 100vw; height: 100vh; max-height: none; border-radius: 0; }
+}
+
 /* ── 响应式补充 ───────────────────────────────────────── */
 @media (max-width: 960px) {
   .today-main { grid-template-columns: 1fr; gap: 1.2rem; }

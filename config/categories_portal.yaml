@@ -126,6 +126,66 @@ metrics:
   - {key: waste_lfp_pack,       name: "废旧LFP电池包",  category: 废旧锂电池,     product: "废旧磷酸铁锂铝壳电池包",  group: E}
   - {key: lfp_powder,           name: "LFP极片粉",      category: 废旧锂电黑粉价格, product: "磷酸铁锂极片粉",         group: E}
 
+# ── 首页「重点产品价格」模块（20 个展示产品 = 24 个 DB 三元组） ──
+# 身份 = (category, product_name, specification) 精确匹配，绝不用模糊名称匹配。
+# 同产品在「磷化工」分类下的重复行（同一 SMM 页双分类收录）靠 db[].category 钉死规避，杜绝双卡。
+# db 为列表以支持规格改名合并：2026-08-03 SMM 页规格文本变更（压实密度→粉体压实密度），
+# 价格序列连续（07-31 压实密度≥2.55g/cm³ → 08-03 粉体压实密度≥2.55g/cm³），
+# 两三元合并为一条按 price_date 升序的序列。若 SMM 再次改名，往对应 entry 的 db 列表追加新三元组即可。
+# 金属盐按业务确认取同名现货产品（非 SMM 指数）；数据口径：value=最新有效价，
+# change_pct=(最新-上一真实有效记录)/上一×100（较上次），7d/30d 窗口只含 DB 真实日期，缺口不补。
+key_products:
+  # ── 回收 / 金属盐 ──
+  - {key: kp_niso4,   display_name: "电池级硫酸镍",  full_name: "电池级硫酸镍（镍含量≥22%）",  business_category: 回收, subcategory: 金属盐, order: 10,
+     db: [{category: 镍化合物, product_name: 电池级硫酸镍, specification: "镍含量≥22%"}]}
+  - {key: kp_coso4,   display_name: "硫酸钴",        full_name: "硫酸钴（Co≥20.5%）",          business_category: 回收, subcategory: 金属盐, order: 20,
+     db: [{category: 钴化合物, product_name: 硫酸钴, specification: "Co≥20.5%"}]}
+  - {key: kp_lce_ind, display_name: "工业级碳酸锂",  full_name: "工业级碳酸锂（Li₂CO₃≥99.2%）", business_category: 回收, subcategory: 金属盐, order: 30,
+     db: [{category: 锂化合物, product_name: 工业级碳酸锂, specification: "Li₂CO₃≥99.2%"}]}
+  - {key: kp_lce_bat, display_name: "电池级碳酸锂",  full_name: "电池级碳酸锂（Li₂CO₃≥99.5%）", business_category: 回收, subcategory: 金属盐, order: 40,
+     db: [{category: 锂化合物, product_name: 电池级碳酸锂, specification: "Li₂CO₃≥99.5%"}]}
+  # ── 回收 / 废极片 ──
+  - {key: kp_waste_dl, display_name: "废旧LFP正极片（动力）", full_name: "废旧磷酸铁锂动力正极片（动力型，3.8%<Li<4.2%）", business_category: 回收, subcategory: 废极片, order: 10,
+     db: [{category: 废旧正极片及系数, product_name: 废旧磷酸铁锂动力正极片, specification: "动力型，3.8%<Li<4.2%"}]}
+  - {key: kp_waste_cn, display_name: "废旧LFP正极片（储能）", full_name: "废旧磷酸铁锂储能正极片（储能型，3.2%<Li<3.5%）", business_category: 回收, subcategory: 废极片, order: 20,
+     db: [{category: 废旧正极片及系数, product_name: 废旧磷酸铁锂储能正极片, specification: "储能型，3.2%<Li<3.5%"}]}
+  # ── 回收 / LFP黑粉 ──
+  - {key: kp_lfp_jpf, display_name: "磷酸铁锂极片粉", full_name: "磷酸铁锂极片粉（3.2%<Li<4.2%）", business_category: 回收, subcategory: LFP黑粉, order: 10,
+     db: [{category: 废旧锂电黑粉价格, product_name: 磷酸铁锂极片粉, specification: "3.2%<Li<4.2%"}]}
+  - {key: kp_lfp_dcf, display_name: "磷酸铁锂电池粉", full_name: "磷酸铁锂电池粉（2.0%<Li<2.8%）", business_category: 回收, subcategory: LFP黑粉, order: 20,
+     db: [{category: 废旧锂电黑粉价格, product_name: 磷酸铁锂电池粉, specification: "2.0%<Li<2.8%"}]}
+  # ── 回收 / NCM黑粉 ──
+  - {key: kp_ncm811, display_name: "三元811极片粉", full_name: "三元811极片粉（811）", business_category: 回收, subcategory: NCM黑粉, order: 10,
+     db: [{category: 废旧锂电黑粉价格, product_name: 三元811极片粉, specification: "811"}]}
+  - {key: kp_ncm622, display_name: "三元622极片粉", full_name: "三元622极片粉（622）", business_category: 回收, subcategory: NCM黑粉, order: 20,
+     db: [{category: 废旧锂电黑粉价格, product_name: 三元622极片粉, specification: "622"}]}
+  - {key: kp_ncm523, display_name: "三元523极片粉", full_name: "三元523极片粉（523）", business_category: 回收, subcategory: NCM黑粉, order: 30,
+     db: [{category: 废旧锂电黑粉价格, product_name: 三元523极片粉, specification: "523"}]}
+  - {key: kp_ncm111, display_name: "三元111极片粉", full_name: "三元111极片粉（111）", business_category: 回收, subcategory: NCM黑粉, order: 40,
+     db: [{category: 废旧锂电黑粉价格, product_name: 三元111极片粉, specification: "111"}]}
+  - {key: kp_ncm_bat, display_name: "三元电池粉",    full_name: "三元电池粉（3%<Li<3.5%）",     business_category: 回收, subcategory: NCM黑粉, order: 50,
+     db: [{category: 废旧锂电黑粉价格, product_name: 三元电池粉, specification: "3%<Li<3.5%"}]}
+  # ── 正极材料 / LFP正极（密度规格；2.55/2.50/2.40/2.30 为改名合并对） ──
+  - {key: kp_lfp_260, display_name: "磷酸铁锂正极 · ≥2.60g/cm³", full_name: "磷酸铁锂（粉体压实密度≥2.60g/cm³）", business_category: 正极材料, subcategory: LFP正极, order: 10,
+     db: [{category: 正极材料, product_name: 磷酸铁锂, specification: "粉体压实密度≥2.60g/cm³"}]}
+  - {key: kp_lfp_255, display_name: "磷酸铁锂正极 · ≥2.55g/cm³", full_name: "磷酸铁锂（压实密度≥2.55g/cm³，含08-03规格改名合并）", business_category: 正极材料, subcategory: LFP正极, order: 20,
+     db: [{category: 正极材料, product_name: 磷酸铁锂, specification: "压实密度≥2.55g/cm³"},
+          {category: 正极材料, product_name: 磷酸铁锂, specification: "粉体压实密度≥2.55g/cm³"}]}
+  - {key: kp_lfp_250, display_name: "磷酸铁锂正极 · ≥2.50g/cm³", full_name: "磷酸铁锂（压实密度≥2.50g/cm³，含08-03规格改名合并）", business_category: 正极材料, subcategory: LFP正极, order: 30,
+     db: [{category: 正极材料, product_name: 磷酸铁锂, specification: "压实密度≥2.50g/cm³"},
+          {category: 正极材料, product_name: 磷酸铁锂, specification: "粉体压实密度≥2.50g/cm³"}]}
+  - {key: kp_lfp_240, display_name: "磷酸铁锂正极 · ≥2.40g/cm³", full_name: "磷酸铁锂（压实密度≥2.40g/cm³，含08-03规格改名合并）", business_category: 正极材料, subcategory: LFP正极, order: 40,
+     db: [{category: 正极材料, product_name: 磷酸铁锂, specification: "压实密度≥2.40g/cm³"},
+          {category: 正极材料, product_name: 磷酸铁锂, specification: "粉体压实密度≥2.40g/cm³"}]}
+  - {key: kp_lfp_230, display_name: "磷酸铁锂正极 · ≥2.30g/cm³", full_name: "磷酸铁锂（压实密度≥2.30g/cm³，含08-03规格改名合并）", business_category: 正极材料, subcategory: LFP正极, order: 50,
+     db: [{category: 正极材料, product_name: 磷酸铁锂, specification: "压实密度≥2.30g/cm³"},
+          {category: 正极材料, product_name: 磷酸铁锂, specification: "粉体压实密度≥2.30g/cm³"}]}
+  # ── 正极材料 / 修复型LFP ──
+  - {key: kp_lfp_xf,  display_name: "修复型磷酸铁锂", full_name: "修复型磷酸铁锂（回收修复型）", business_category: 正极材料, subcategory: 修复型LFP, order: 10,
+     db: [{category: 正极材料, product_name: 修复型磷酸铁锂, specification: "回收修复型"}]}
+  - {key: kp_lfp_xf_h, display_name: "修复型磷酸铁锂（高端款）", full_name: "修复型磷酸铁锂(高端款)（回收修复型，压实密度不小于2.55g/cm³）", business_category: 正极材料, subcategory: 修复型LFP, order: 20,
+     db: [{category: 正极材料, product_name: 修复型磷酸铁锂(高端款), specification: "回收修复型，压实密度不小于2.55g/cm³。"}]}
+
 # ── 业务专题 ──
 topics:
   lfp:

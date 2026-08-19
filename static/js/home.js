@@ -1,11 +1,12 @@
-/* 首页渲染：今日必看 / 指标卡 / 专题入口 / 最近更新 / 固定汇总状态 */
+/* 首页渲染：今日必看 / 专题入口 / 最近更新 / 固定汇总状态
+   （重点产品价格模块见 keyproducts.js；今日价格页的指标卡在 today.js 独立渲染） */
 "use strict";
 
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     const ov = await API.get("/api/overview");
     renderToday(ov);
-    renderMetrics(ov);
+    // 重点产品价格模块由 keyproducts.js 独立加载 /api/key-products 渲染
     renderTopics(ov);
     renderRecent(ov);
     renderFixed(ov);
@@ -55,33 +56,6 @@ function renderToday(ov) {
     <a class="btn btn-outline" href="/today">📂 今日分类数据查看 →</a>
   </div>
 </div>`;
-}
-
-/* ── 关键指标卡 ───────────────────────────────────────── */
-function renderMetrics(ov) {
-  const el = document.getElementById("metric-grid");
-  const ms = ov.metrics || [];
-  if (!ms.length) { el.innerHTML = '<div class="empty-state">暂无指标数据</div>'; return; }
-  el.innerHTML = ms.map((m) => {
-    // 趋势线数据全部来自后端 spark_points（逐点带日期，可追溯到 DB 真实记录）
-    const sparkVals = (m.spark_points || []).map((p) => p.value);
-    return `
-<div class="metric-card">
-  <div class="metric-head">
-    <span class="metric-name">${Fmt.esc(m.name)}</span>
-    <span class="metric-sub">${Fmt.esc(m.category || "")}</span>
-  </div>
-  <div class="metric-value">${Fmt.price(m.value)}<span class="metric-unit">${Fmt.esc(m.unit || "")}</span></div>
-  <div class="metric-change">
-    <span class="${Fmt.cls(m.change_pct)}">${m.change_pct === null || m.change_pct === undefined ? "—" : "较上次 " + (m.prev_date ? "(" + String(m.prev_date).slice(5) + ") " : "") + Fmt.pct(m.change_pct)}</span>
-  </div>
-  <div class="metric-spark" data-spark="${Fmt.esc(JSON.stringify(sparkVals))}"></div>
-  <div class="metric-time">数据日期：${Fmt.esc(m.price_date || "—")}${m.is_stale ? '<span class="label-warn">数据较旧</span>' : ""} · 更新时间：${Fmt.esc(m.updated_at || "—")}</div>
-</div>`;
-  }).join("");
-  el.querySelectorAll(".metric-spark").forEach((d) => {
-    try { renderSparkline(d, JSON.parse(d.dataset.spark)); } catch (e) { /* ignore */ }
-  });
 }
 
 /* ── 专题入口 ─────────────────────────────────────────── */
