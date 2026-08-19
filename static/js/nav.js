@@ -6,7 +6,6 @@ const NAV_LINKS = [
   ["/today", "今日价格"],
   ["/history", "历史数据"],
   ["/topics", "业务专题"],
-  ["/quality", "数据质量"],
 ];
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -20,7 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
     navEl.outerHTML = `
 <nav class="navbar">
   <div class="navbar-inner">
-    <div class="navbar-brand"><span class="icon">⚡</span> SMM 锂电价格与回收业务数据中心</div>
+    <div class="navbar-brand"><span class="icon">⚡</span> 锂电价格与回收业务数据中心</div>
     <div class="navbar-right">
       <ul class="navbar-links">${links}</ul>
       <ul class="navbar-links" id="navbar-auth"></ul>
@@ -33,7 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (footEl) {
     footEl.outerHTML = `
 <div class="footer">
-  <div class="footer-title">SMM 锂电价格与回收业务数据中心</div>
+  <div class="footer-title">锂电价格与回收业务数据中心</div>
   <div class="footer-line">聚焦锂电价格、材料价格、基础金属与回收链价格数据 · 数据用于内部分析与行业研究</div>
   <div class="footer-line">数据来源：SMM 上海有色网公开报价（采集器自动采集）</div>
 </div>`;
@@ -51,6 +50,8 @@ function renderAuthLinks(page) {
     }
     const isAdmin = me.role === "admin";
     const parts = [
+      // 数据质量与运维中心仅管理员可见（服务端已做同等校验，这里只是隐藏入口）
+      isAdmin ? `<li><a href="/quality"${page === "quality" ? ' class="active"' : ""}>数据质量</a></li>` : "",
       isAdmin ? `<li><a href="/admin"${page === "admin" ? ' class="active"' : ""}>运维中心</a></li>` : "",
       `<li><a href="/account"${page === "account" ? ' class="active"' : ""}>账号</a></li>`,
       `<li><a href="#" id="logout-link">退出登录</a></li>`,

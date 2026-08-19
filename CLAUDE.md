@@ -7,7 +7,7 @@
 - **项目目标**：自动化从 SMM（上海有色网）每日采集锂电现货页面全部可见分类的现货价格数据（约 40 个分类，覆盖锂电全产业链），存入 SQLite 数据库并导出 Excel/CSV 报表。
 - **业务背景**：锂电产业链价格跟踪需要每日采集 SMM 公开报价数据，手工采集耗时易错，需要合规的自动化工具有效获取数据。页面分类会随业务更新而增减，因此采用动态发现而非固定列表。
 - **核心使用场景**：
-  - 每日自动采集（Windows 任务计划程序 10:00）
+  - 每日自动采集（服务器 cron 工作日 9:05，次日采集模式：采前一天数据）
   - 手动指定日期/分类采集
   - 页面结构变化时运行诊断脚本（自动发现全部分类）
   - 登录状态过期后重新手动登录
@@ -132,6 +132,7 @@ C:\科研\smm_lithium_collector/
 │    ├── 字段映射：中文表头 → 标准英文字段                             │
 │    ├── parse_decimal() 数字清洗 + parse_price_date() 日期推导       │
 │    ├── validate_row() 数据校验（价格逻辑+完整性）                    │
+│    ├── 页面数据日期校准 modal_price_date()（当日未发布→按页面众数日期）│
 │    └── 分类失败不影响后续分类（continue_on_category_failure）        │
 └─────────────────────┬──────────────────────────────────────────┘
                       ▼
@@ -275,13 +276,15 @@ python scripts/backfill.py --start-date 2026-07-01 --end-date 2026-07-22
 pytest -q
 
 # 安装每日定时任务（Linux 服务器）
-bash scripts/install_cron.sh        # 10:00 全量采集 + 11:00 铜铝镍补采 + 12:30 全量兜底
+bash scripts/install_cron.sh        # 工作日 9:05 采集前一天数据（次日采集模式，无当天兜底任务）
 
 # 数据门户（服务器 8888 端口，smmweb 非特权用户运行）
-#   首页 / 今日价格 /today / 历史数据 /history / 业务专题 /topics（回收链重点）/ 数据质量 /quality
-#   公网可达，HTTP Basic 鉴权（2026-08-13 起启用）：账号/密码哈希在 config/categories_portal.yaml 的 portal_auth 段
-#   改密码: python -c "import hashlib;print(hashlib.sha256(input().encode()).hexdigest())" 替换 password_sha256
-#   临时关闭: portal_auth.enabled=false（仅限确认门户只在内网可达时）
+#   首页 / 今日价格 /today / 历史数据 /history / 业务专题 /topics（回收链重点）
+#   数据质量 /quality 与运维中心 /admin（含 /admin/users 用户管理）仅管理员可见（服务端 role 校验）
+#   表单登录 + 服务端 Session；账号库 /var/lib/smm-fileserver/auth.db（PBKDF2-SHA256，0600，Web 不可达）
+#   公开页：/login 登录、/register 注册（服务端强制 role=user，忽略前端 role 参数）
+#   管理员用户管理 API：GET|POST /api/admin/users（停用/启用/重置密码为 123456/软删除）
+#   账号初始化/重置：python scripts/init_auth.py（--reset 重置密码并强制首登改密）
 # 重启: systemctl restart smm-fileserver
 
 # 从 SQLite 重建历史汇总 + 固定汇总（发现汇总异常时）
@@ -434,5 +437,5 @@ bash scripts/install_cron.sh        # 10:00 全量采集 + 11:00 铜铝镍补采
 
 - pandas `FutureWarning`：空的 DataFrame concat 行为将变化
 - `.pytest_cache` 写入权限问题（不影响测试）
-- SMM 发布时间不固定（10:00~12:30），正式固定汇总依赖 12:30 兜底运行，偶尔可能当日未更新（次日自然补上）
+- 次日采集模式：每天 9:05 采集前一天（页面有数据的最近交易日）数据，当天不采集当日数据；页面数据日期校准保证未发布/节假日时按页面日期对齐不产生 FAIL（周五数据周一早上入库，周末门户显示周四数据）
 - 门控阈值（对齐率 0.6 / invalid 0.05）为初值，观察一周 manifest 后可校准（config/categories_portal.yaml）

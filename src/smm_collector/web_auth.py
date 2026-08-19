@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import re
 import secrets
 import sqlite3
 import threading
@@ -20,6 +21,12 @@ from datetime import datetime, timedelta
 PBKDF2_ROUNDS = 600_000
 SESSION_TOKEN_BYTES = 32
 CSRF_TOKEN_BYTES = 32
+
+# 注册规则（服务端强制，前端校验仅为提示）：用户名 3-30 位字母/数字/下划线/连字符/中文
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_\-一-龥]{3,30}$")
+PASSWORD_MAX_LENGTH = 128
+# 管理员重置密码后的统一初始密码（首次登录强制修改）
+DEFAULT_RESET_PASSWORD = "123456"
 
 # 全局信号量：限制并发 PBKDF2 校验，防止登录接口被用来耗尽 CPU
 _verify_semaphore = threading.BoundedSemaphore(4)
@@ -97,11 +104,14 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash        TEXT NOT NULL,
     role                 TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
     is_active            INTEGER NOT NULL DEFAULT 1,
+    is_deleted           INTEGER NOT NULL DEFAULT 0,
     must_change_password INTEGER NOT NULL DEFAULT 0,
     created_at           TEXT NOT NULL,
     updated_at           TEXT NOT NULL,
     last_login_at        TEXT
 );
+-- 大小写不敏感唯一：防止 admin/Admin 之类混淆（软删除账号也保留占用）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_ci ON users(username COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS sessions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     token_hash   TEXT NOT NULL UNIQUE,
@@ -171,6 +181,10 @@ class AuthStore:
         with self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            # 幂等迁移：旧库补 is_deleted 列（CREATE TABLE IF NOT EXISTS 不会给已存在的表加列）
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
+            if "is_deleted" not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
 
     # ── 用户 ──────────────────────────────────────────
 
@@ -215,6 +229,91 @@ class AuthStore:
                 "UPDATE users SET password_hash=?, must_change_password=?, updated_at=? WHERE id=?",
                 (password_hash, int(bool(must_change_password)), _iso(_now()), user_id))
 
+    # ── 注册与用户管理 ────────────────────────────────
+
+    def register_user(self, username: str, password: str) -> tuple[str, str]:
+        """自助注册（/api/auth/register 专用）：强制 role='user'，无需审批直接激活。
+
+        本方法不接收 role 参数——任何注册来源都只能创建普通用户（安全要求）。
+        返回 (status, message)，status ∈ {"ok","bad_username","bad_password","duplicate"}。
+        """
+        if not USERNAME_RE.match(username):
+            return "bad_username", "用户名需为3-30位字母、数字、下划线、连字符或中文"
+        if len(password) < self.password_min_length:
+            return "bad_password", f"密码长度至少 {self.password_min_length} 位"
+        if len(password) > PASSWORD_MAX_LENGTH:
+            return "bad_password", f"密码长度不能超过 {PASSWORD_MAX_LENGTH} 位"
+        now = _iso(_now())
+        try:
+            with self._conn() as conn:
+                # 大小写不敏感查重（含软删除账号，用户名持续占用），防 admin/Admin 混淆
+                dup = conn.execute(
+                    "SELECT 1 FROM users WHERE username=? COLLATE NOCASE LIMIT 1",
+                    (username,)).fetchone()
+                if dup:
+                    return "duplicate", "该用户名已存在，请更换用户名。"
+                conn.execute(
+                    "INSERT INTO users(username, password_hash, role, is_active,"
+                    " is_deleted, must_change_password, created_at, updated_at)"
+                    " VALUES(?,?,'user',1,0,0,?,?)",
+                    (username, hash_password(password), now, now))
+            return "ok", "注册成功"
+        except sqlite3.IntegrityError:
+            return "duplicate", "该用户名已存在，请更换用户名。"
+
+    def list_users(self, include_deleted: bool = False) -> list[dict]:
+        """用户列表（管理员视图）。显式列清单，绝不包含 password_hash。"""
+        sql = ("SELECT id, username, role, is_active, is_deleted, must_change_password,"
+               " created_at, last_login_at FROM users")
+        if not include_deleted:
+            sql += " WHERE is_deleted=0"
+        sql += " ORDER BY id"
+        with self._conn() as conn:
+            rows = conn.execute(sql).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["is_active"] = bool(d["is_active"])
+            d["is_deleted"] = bool(d["is_deleted"])
+            d["must_change_password"] = bool(d["must_change_password"])
+            out.append(d)
+        return out
+
+    def set_user_active(self, user_id: int, active: bool) -> bool:
+        """启用/停用用户；停用时立即清除其全部会话。未知用户返回 False。"""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET is_active=?, updated_at=? WHERE id=?",
+                (int(bool(active)), _iso(_now()), user_id))
+            if cur.rowcount == 0:
+                return False
+        if not active:
+            self.delete_all_sessions(user_id)
+        return True
+
+    def reset_user_password(self, user_id: int) -> bool:
+        """管理员重置密码：统一重置为 123456 并要求首次登录强制修改。未知用户返回 False。"""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET password_hash=?, must_change_password=1,"
+                " updated_at=? WHERE id=?",
+                (hash_password(DEFAULT_RESET_PASSWORD), _iso(_now()), user_id))
+            if cur.rowcount == 0:
+                return False
+        self.delete_all_sessions(user_id)
+        return True
+
+    def soft_delete_user(self, user_id: int) -> bool:
+        """软删除（注销）：保留记录但禁止登录，用户名继续占用。未知用户返回 False。"""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET is_deleted=1, is_active=0, updated_at=? WHERE id=?",
+                (_iso(_now()), user_id))
+            if cur.rowcount == 0:
+                return False
+        self.delete_all_sessions(user_id)
+        return True
+
     # ── 登录与锁定 ────────────────────────────────────
 
     def _lock_status(self, username: str, ip: str, now: datetime) -> tuple[str, int | None]:
@@ -248,7 +347,7 @@ class AuthStore:
     def authenticate(self, username: str, password: str, ip: str,
                      user_agent: str = "") -> tuple[str, dict | None, int | None]:
         """校验凭据。返回 (status, user, retry_after_seconds)；
-        status ∈ {"ok", "bad_credentials", "locked"}。"""
+        status ∈ {"ok", "bad_credentials", "locked", "disabled"}。"""
         now = _now()
         status, retry = self._lock_status(username, ip, now)
         if status == "locked":
@@ -266,12 +365,18 @@ class AuthStore:
             return ("locked", None, retry2) if status2 == "locked" else ("bad_credentials", None, None)
 
         ok = verify_password(password, user["password_hash"])
-        if not ok or not user["is_active"]:
+        if not ok:
             self._record_attempt(username, ip, now, False)
             self._audit("LOGIN_FAIL", username, ip, user_agent)
             # 本次失败可能恰好触发锁定，重查一次以返回剩余等待秒数
             status2, retry2 = self._lock_status(username, ip, _now())
             return ("locked", None, retry2) if status2 == "locked" else ("bad_credentials", None, None)
+
+        # 密码正确但账号停用/已删除：仅在凭据有效时提示，避免暴露账号状态（防枚举）
+        if not user["is_active"] or user.get("is_deleted"):
+            self._record_attempt(username, ip, now, False)
+            self._audit("LOGIN_DISABLED", username, ip, user_agent)
+            return "disabled", None, None
 
         self._record_attempt(username, ip, now, True)
         self._reset_failures(username, ip)
@@ -309,12 +414,13 @@ class AuthStore:
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT s.id AS session_id, s.csrf_token, s.expires_at, s.last_seen_at,"
-                " u.id AS user_id, u.username, u.role, u.is_active, u.must_change_password"
+                " u.id AS user_id, u.username, u.role, u.is_active, u.is_deleted,"
+                " u.must_change_password"
                 " FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash=?",
                 (token_hash(token),)).fetchone()
         if row is None:
             return None
-        if row["expires_at"] <= _iso(now) or not row["is_active"]:
+        if row["expires_at"] <= _iso(now) or not row["is_active"] or row["is_deleted"]:
             self.delete_session(token)
             return None
         out = dict(row)
@@ -368,9 +474,14 @@ class AuthStore:
         if user is None:
             return False, "用户不存在"
         if not verify_password(old_password, user["password_hash"]):
+            # 原密码错误同样计入失败尝试，防止持会话者无锁定暴力猜原密码
+            self._record_attempt(user["username"], ip, _now(), False)
+            self._audit("PASSWORD_CHANGE_FAIL", user["username"], ip, user_agent)
             return False, "当前密码不正确"
         if len(new_password) < self.password_min_length:
             return False, f"新密码长度至少 {self.password_min_length} 位"
+        if len(new_password) > PASSWORD_MAX_LENGTH:
+            return False, f"新密码长度不能超过 {PASSWORD_MAX_LENGTH} 位"
         if verify_password(new_password, user["password_hash"]):
             return False, "新密码不能与当前密码相同"
         self.set_password(user_id, new_password)

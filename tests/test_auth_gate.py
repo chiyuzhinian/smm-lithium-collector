@@ -24,7 +24,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "file_server.py"
 
 PORTAL_YAML = """
 portal:
-  title: "SMM 锂电价格与回收业务数据中心"
+  title: "锂电价格与回收业务数据中心"
   subtitle: "test"
 auth:
   session_ttl_hours: 10
@@ -88,6 +88,8 @@ def env(tmp_path, monkeypatch):
     store = AuthStore(str(auth_db), dict(AUTH_CFG))
     store.ensure_schema()
     monkeypatch.setattr(mod, "AUTH_STORE", store)
+    # 注册节流按 IP（测试流量全部来自 127.0.0.1），每个用例清空，避免互相干扰
+    monkeypatch.setattr(mod, "_register_attempts", {})
 
     server = mod.ReusableThreadingTCPServer(("127.0.0.1", 0), mod.DataCenterHandler)
     port = server.server_address[1]
@@ -313,3 +315,245 @@ class TestTraversalAndFailClosed:
         r2 = request(env.port, "GET", "/api/overview", headers=h)
         assert r2["status"] == 503
         assert request(env.port, "GET", "/health")["status"] == 200  # 健康检查豁免
+
+
+# ── 注册 ──────────────────────────────────────────────
+
+def register(port, username, password, extra=None):
+    payload = {"username": username, "password": password, **(extra or {})}
+    return request(port, "POST", "/api/auth/register", json.dumps(payload),
+                   {"Content-Type": "application/json"})
+
+
+class TestRegister:
+    def test_register_page_public(self, env):
+        r = request(env.port, "GET", "/register")
+        assert r["status"] == 200
+        assert "锂电价格与回收业务数据中心" in r["body"]
+        assert "华友内部数据服务" in r["body"]
+        assert "返回登录" in r["body"]
+        # 注册页只提供用户名/密码，无任何角色选择
+        assert "role" not in r["body"] and "角色" not in r["body"]
+
+    def test_login_page_has_register_link(self, env):
+        r = request(env.port, "GET", "/login")
+        assert r["status"] == 200
+        assert "没有账号？" in r["body"] and 'href="/register"' in r["body"]
+
+    def test_register_then_login_full_flow(self, env):
+        r = register(env.port, "newuser", "pw-123456")
+        assert r["status"] == 201 and json.loads(r["body"])["ok"] is True
+        # 不自动登录：注册成功后回到登录页登录
+        lr, cookie = login(env.port, "newuser", "pw-123456")
+        assert lr["status"] == 200
+        body = json.loads(lr["body"])
+        assert body["role"] == "user" and body["must_change_password"] is False
+        me = json.loads(request(env.port, "GET", "/api/auth/me",
+                                headers=cookie_header(cookie))["body"])
+        assert me["role"] == "user" and me["must_change_password"] is False
+        assert request(env.port, "GET", "/", headers=cookie_header(cookie))["status"] == 200
+
+    def test_duplicate_username_409(self, env):
+        assert register(env.port, "dupuser", "pw-123456")["status"] == 201
+        r = register(env.port, "dupuser", "pw-654321")
+        assert r["status"] == 409
+        assert json.loads(r["body"])["error"] == "该用户名已存在，请更换用户名。"
+
+    def test_duplicate_case_insensitive(self, env):
+        assert register(env.port, "CaseUser", "pw-123456")["status"] == 201
+        assert register(env.port, "caseuser", "pw-654321")["status"] == 409
+
+    def test_role_param_ignored_server_side(self, env):
+        # 伪造注册请求带 role=admin：后端必须忽略，仍创建普通用户
+        r = register(env.port, "eviluser", "pw-123456", extra={"role": "admin"})
+        assert r["status"] == 201
+        lr, cookie = login(env.port, "eviluser", "pw-123456")
+        assert json.loads(lr["body"])["role"] == "user"
+        # 普通用户无法访问管理员 API
+        r2 = request(env.port, "GET", "/api/admin/overview", headers=cookie_header(cookie))
+        assert r2["status"] == 403
+
+    def test_username_and_password_validation(self, env):
+        assert register(env.port, "ab", "pw-123456")["status"] == 400     # 用户名过短
+        assert register(env.port, "a b!", "pw-123456")["status"] == 400  # 非法字符
+        assert register(env.port, "okuser", "short12")["status"] == 400  # 密码 7 位
+        r = register(env.port, "okuser", "pw-123456")
+        assert r["status"] == 201
+
+    def test_register_throttle_per_ip(self, env):
+        for i in range(5):
+            assert register(env.port, f"bulk{i}", "pw-123456")["status"] == 201
+        r = register(env.port, "bulk6", "pw-123456")
+        assert r["status"] == 429  # 同 IP 每小时 5 个
+
+
+# ── 管理员用户管理 ────────────────────────────────────
+
+def admin_headers(env, cookie):
+    csrf = json.loads(request(env.port, "GET", "/api/auth/csrf",
+                              headers=cookie_header(cookie))["body"])["csrf_token"]
+    return {"Content-Type": "application/json", "X-CSRF": csrf, **cookie_header(cookie)}
+
+
+class TestAdminUserManagement:
+    def test_page_and_api_rbac(self, env):
+        victim = seed(env.store, "victim")
+        seed(env.store, "admin", role="admin")
+        _, u_cookie = login(env.port, "victim", "pw-123456")
+        _, a_cookie = login(env.port, "admin", "pw-123456")
+        # 普通用户：页面与 API 一律 403
+        assert request(env.port, "GET", "/admin/users", headers=cookie_header(u_cookie))["status"] == 403
+        assert request(env.port, "GET", "/api/admin/users", headers=cookie_header(u_cookie))["status"] == 403
+        r = request(env.port, "POST", "/api/admin/users",
+                    json.dumps({"id": victim["id"], "action": "disable"}),
+                    {"Content-Type": "application/json", **cookie_header(u_cookie)})
+        assert r["status"] == 403
+        # 管理员：正常
+        assert request(env.port, "GET", "/admin/users", headers=cookie_header(a_cookie))["status"] == 200
+        r2 = request(env.port, "GET", "/api/admin/users", headers=cookie_header(a_cookie))
+        assert r2["status"] == 200
+        users = json.loads(r2["body"])["users"]
+        names = [u["username"] for u in users]
+        assert "victim" in names and "admin" in names
+        assert all("password_hash" not in u for u in users)  # 绝不泄露密码哈希
+
+    def test_disable_enable_lifecycle(self, env):
+        victim = seed(env.store, "victim")
+        seed(env.store, "admin", role="admin")
+        _, v_cookie = login(env.port, "victim", "pw-123456")
+        _, a_cookie = login(env.port, "admin", "pw-123456")
+        h = admin_headers(env, a_cookie)
+        # 停用 → 会话立即失效 + 登录提示账号已停用
+        r = request(env.port, "POST", "/api/admin/users",
+                    json.dumps({"id": victim["id"], "action": "disable"}), h)
+        assert r["status"] == 200 and "已停用" in json.loads(r["body"])["message"]
+        assert request(env.port, "GET", "/api/auth/me", headers=cookie_header(v_cookie))["status"] == 401
+        lr, _ = login(env.port, "victim", "pw-123456")
+        assert lr["status"] == 401 and "账号已停用" in lr["body"]
+        # 启用 → 恢复登录
+        r2 = request(env.port, "POST", "/api/admin/users",
+                     json.dumps({"id": victim["id"], "action": "enable"}), h)
+        assert r2["status"] == 200
+        assert login(env.port, "victim", "pw-123456")[0]["status"] == 200
+
+    def test_reset_password_forces_change(self, env):
+        victim = seed(env.store, "victim")
+        seed(env.store, "admin", role="admin")
+        _, a_cookie = login(env.port, "admin", "pw-123456")
+        h = admin_headers(env, a_cookie)
+        r = request(env.port, "POST", "/api/admin/users",
+                    json.dumps({"id": victim["id"], "action": "reset_password"}), h)
+        assert r["status"] == 200 and "123456" in json.loads(r["body"])["message"]
+        # 旧密码失效；123456 可登录但强制改密
+        assert login(env.port, "victim", "pw-123456")[0]["status"] == 401
+        lr, v_cookie = login(env.port, "victim", "123456")
+        assert lr["status"] == 200 and json.loads(lr["body"])["must_change_password"] is True
+        vh = cookie_header(v_cookie)
+        assert request(env.port, "GET", "/", headers=vh)["status"] == 302  # 被强制去改密页
+        csrf = json.loads(request(env.port, "GET", "/api/auth/csrf", headers=vh)["body"])["csrf_token"]
+        r2 = request(env.port, "POST", "/api/auth/change-password",
+                     json.dumps({"current": "123456", "new": "new-pw-456"}),
+                     {"Content-Type": "application/json", "X-CSRF": csrf, **vh})
+        assert r2["status"] == 200
+        # 改密后重新登录不受限
+        _, v_cookie2 = login(env.port, "victim", "new-pw-456")
+        assert json.loads(
+            request(env.port, "GET", "/api/auth/me", headers=cookie_header(v_cookie2))["body"]
+        )["must_change_password"] is False
+        assert request(env.port, "GET", "/", headers=cookie_header(v_cookie2))["status"] == 200
+
+    def test_delete_soft(self, env):
+        victim = seed(env.store, "victim")
+        seed(env.store, "admin", role="admin")
+        _, a_cookie = login(env.port, "admin", "pw-123456")
+        h = admin_headers(env, a_cookie)
+        r = request(env.port, "POST", "/api/admin/users",
+                    json.dumps({"id": victim["id"], "action": "delete"}), h)
+        assert r["status"] == 200
+        lr, _ = login(env.port, "victim", "pw-123456")
+        assert lr["status"] == 401 and "账号已停用" in lr["body"]
+        users = json.loads(request(env.port, "GET", "/api/admin/users",
+                                   headers=cookie_header(a_cookie))["body"])["users"]
+        assert "victim" not in [u["username"] for u in users]
+
+    def test_guard_rails(self, env):
+        victim = seed(env.store, "victim")
+        admin = seed(env.store, "admin", role="admin")
+        _, a_cookie = login(env.port, "admin", "pw-123456")
+        h = admin_headers(env, a_cookie)
+        # 不能操作管理员账号
+        r1 = request(env.port, "POST", "/api/admin/users",
+                     json.dumps({"id": admin["id"], "action": "disable"}), h)
+        assert r1["status"] == 400 and "管理员" in r1["body"]
+        # 不能对自己操作（admin 目标本身也是管理员，同样拦截）
+        r2 = request(env.port, "POST", "/api/admin/users",
+                     json.dumps({"id": admin["id"], "action": "reset_password"}), h)
+        assert r2["status"] == 400
+        # 目标不存在
+        r3 = request(env.port, "POST", "/api/admin/users",
+                     json.dumps({"id": 9999, "action": "disable"}), h)
+        assert r3["status"] == 400 and "不存在" in r3["body"]
+        # 未知动作
+        r4 = request(env.port, "POST", "/api/admin/users",
+                     json.dumps({"id": victim["id"], "action": "make_admin"}), h)
+        assert r4["status"] == 400
+        # 无 CSRF 头
+        r5 = request(env.port, "POST", "/api/admin/users",
+                     json.dumps({"id": victim["id"], "action": "disable"}),
+                     {"Content-Type": "application/json", **cookie_header(a_cookie)})
+        assert r5["status"] == 403
+
+
+# ── 数据质量页仅管理员 ────────────────────────────────
+
+class TestQualityAdminOnly:
+    def test_plain_user_forbidden(self, env):
+        seed(env.store, "huayou")
+        seed(env.store, "admin", role="admin")
+        _, u_cookie = login(env.port, "huayou", "pw-123456")
+        _, a_cookie = login(env.port, "admin", "pw-123456")
+        # 普通用户：页面 403 页，API 403 JSON
+        rp = request(env.port, "GET", "/quality", headers=cookie_header(u_cookie))
+        assert rp["status"] == 403 and "无权限访问" in rp["body"]
+        ra = request(env.port, "GET", "/api/quality", headers=cookie_header(u_cookie))
+        assert ra["status"] == 403 and json.loads(ra["body"])["error"] == "无管理员权限"
+        # 管理员：正常
+        assert request(env.port, "GET", "/quality", headers=cookie_header(a_cookie))["status"] == 200
+        assert request(env.port, "GET", "/api/quality", headers=cookie_header(a_cookie))["status"] == 200
+
+    def test_unauthenticated_redirects(self, env):
+        r = request(env.port, "GET", "/quality")
+        assert r["status"] == 302 and r["headers"]["location"].startswith("/login")
+
+
+# ── 品牌名与数据来源字符串 ─────────────────────────────
+
+class TestBrandStrings:
+    def test_login_page_brand(self, env):
+        r = request(env.port, "GET", "/login")
+        assert "锂电价格与回收业务数据中心" in r["body"]
+        assert "SMM 锂电价格与回收业务数据中心" not in r["body"]
+        assert "华友内部数据服务" in r["body"]
+        # 数据来源中的 SMM 保留
+        assert "数据来源：SMM 上海有色网公开报价" in r["body"]
+
+    def test_overview_banner_title(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = request(env.port, "GET", "/api/overview", headers=cookie_header(cookie))
+        assert r["status"] == 200
+        assert json.loads(r["body"])["banner"]["title"] == "锂电价格与回收业务数据中心"
+
+    def test_nav_js_brand_and_data_source(self, env):
+        r = request(env.port, "GET", "/static/js/nav.js")
+        assert "锂电价格与回收业务数据中心" in r["body"]
+        assert "SMM 锂电价格与回收业务数据中心" not in r["body"]
+        assert "数据来源：SMM 上海有色网公开报价" in r["body"]
+
+    def test_home_page_brand(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = request(env.port, "GET", "/", headers=cookie_header(cookie))
+        assert r["status"] == 200
+        assert "锂电价格与回收业务数据中心" in r["body"]
+        assert "SMM 锂电价格与回收业务数据中心" not in r["body"]

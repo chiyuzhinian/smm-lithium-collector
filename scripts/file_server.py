@@ -1,15 +1,19 @@
-"""SMM 锂电价格与回收业务数据中心 — 门户服务器。
+"""锂电价格与回收业务数据中心 — 门户服务器。
 
 基于 Python 标准库 http.server，无额外依赖（PyYAML 用于门户配置解析）。
 功能：
-  GET / /today /history /topics /quality → 门户页面（static/*.html，需登录）
-  GET /login /account /admin            → 登录 / 账号 / 运维中心页面
+  GET / /today /history /topics → 门户页面（static/*.html，需登录）
+  GET /quality                  → 数据质量页（仅管理员）
+  GET /login /register /account /admin [/admin/users]
+                                → 登录 / 注册 / 账号 / 运维中心页面
   GET /static/*      → CSS / JS 静态资源（含 ECharts 本地文件，公开）
   GET /health        → 轻量健康检查（公开，无敏感信息）
-  POST /api/auth/login|logout|change-password → 登录 / 登出 / 改密
-  GET /api/auth/me|csrf                   → 当前用户 / CSRF token
+  POST /api/auth/login|register → 登录 / 注册（公开；注册强制 role=user）
+  POST /api/auth/logout|change-password → 登出 / 改密（登录 + CSRF）
+  GET /api/auth/me|csrf         → 当前用户 / CSRF token
+  GET|POST /api/admin/users     → 用户管理（列表 / 停用 / 启用 / 重置密码 / 删除）
   GET /api/admin/overview|tasks|data-quality|errors|logs|events|audit
-                                          → 管理员运维 API（服务端 role 校验）
+                                → 管理员运维 API（服务端 role 校验）
   GET /api/files     → 文件列表 JSON API（30s TTL 缓存，向后兼容）
   GET /api/stats     → 统计摘要 JSON API（向后兼容）
   GET /api/overview  → 首页总览（今日必看/指标卡/专题/最近更新/固定汇总状态）
@@ -17,7 +21,7 @@
   GET /api/history   → 历史数据中心（日期/分类/搜索/分页）
   GET /api/categories→ A-F 业务分组与分类清单
   GET /api/trends    → 趋势序列（SQLite 只读查询）
-  GET /api/quality   → 数据质量面板（manifest + 固定汇总状态 + 缺口）
+  GET /api/quality   → 数据质量面板（仅管理员）
   GET /api/topics    → 业务专题（回收链重点）
   GET /*             → 文件下载 / 目录浏览（exports 根内，需登录）
 """
@@ -76,13 +80,20 @@ PAGE_MAP = {
     "/topics": "topics.html",
     "/quality": "quality.html",
     "/login": "login.html",
+    "/register": "register.html",
     "/account": "account.html",
     "/admin": "admin.html",
+    "/admin/users": "admin.html",  # 运维中心「用户管理」直达（同页 tab）
 }
 
-# 公开路径（无需登录）：登录页 / 健康检查 / 静态资源（仅 CSS/JS/HTML，不含数据）
-PUBLIC_PATHS = {"/login", "/health"}
+# 公开路径（无需登录）：登录页 / 注册页 / 健康检查 / 静态资源（仅 CSS/JS/HTML，不含数据）
+PUBLIC_PATHS = {"/login", "/register", "/health"}
 PUBLIC_PREFIXES = ("/static/",)
+
+# 注册节流：按 IP 计数（成功注册才计数），防止公开端点被滥用
+REGISTER_MAX_PER_HOUR = 5
+_register_attempts: dict[str, list[float]] = {}
+_register_lock = threading.Lock()
 
 # 安全白名单：只有这些扩展名允许直接下载
 ALLOWED_EXTENSIONS = {
@@ -321,16 +332,25 @@ def _daily_dates_from_exports() -> list[str]:
 
 
 def _db_latest_date() -> str | None:
-    rows = _db_query("SELECT MAX(price_date) AS d FROM lithium_spot_prices")
-    return str(rows[0]["d"]) if rows and rows[0]["d"] else None
+    """SQLite 最大 price_date；只认 YYYY-MM-DD，避免 ''/NULL/'None' 等脏值污染。"""
+    rows = _db_query(
+        "SELECT MAX(price_date) AS d FROM lithium_spot_prices "
+        "WHERE price_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'")
+    d = rows[0]["d"] if rows else None
+    return d or None
 
 
 def _latest_date() -> str | None:
-    """最新数据日期 = max(SQLite 最大 price_date, exports 每日文件最新日期)。"""
+    """最新数据日期：优先 SQLite 最大 price_date（真实数据日期）；
+    DB 无数据时回退 exports 每日文件最新日期。
+
+    周一上午页面仍是上周五数据时，门户应展示周五而非运行日文件名，
+    避免「当日价格尚未发布」式误导展示。"""
     db_latest = _db_latest_date()
+    if db_latest:
+        return db_latest
     export_dates = _daily_dates_from_exports()
-    candidates = [d for d in (export_dates[:1] + ([db_latest] if db_latest else [])) if d]
-    return max(candidates) if candidates else None
+    return export_dates[0] if export_dates else None
 
 
 def _daily_files(date_str: str) -> dict:
@@ -441,9 +461,13 @@ def _compute_gaps() -> list[dict]:
     gaps = []
     rows = _db_query(
         "SELECT price_date, COUNT(*) AS c FROM lithium_spot_prices "
-        "WHERE price_date >= '2026-07-01' GROUP BY price_date ORDER BY price_date")
+        "WHERE price_date >= '2026-07-01' "
+        "AND price_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' "
+        "GROUP BY price_date ORDER BY price_date")
     for r in rows:
-        d = str(r["price_date"])
+        d = r["price_date"]
+        if not d:
+            continue
         if not (EXPORTS_ROOT / d[:4] / d[5:7] / "每日汇总" / "CSV" / f"{DAILY_STEM}_{d}.csv").exists():
             gaps.append({"date": d, "reason": f"数据库有 {r['c']} 行但无每日导出文件"})
     return gaps
@@ -495,41 +519,101 @@ def _trend_series(product=None, category=None, date_from=None, date_to=None) -> 
     return out
 
 
+def _is_stale(latest: str, global_latest: str | None, max_days: int = 14) -> bool:
+    """该产品最新数据日期落后全局最新日期超过 max_days 天 → 数据较旧（仅标记，不隐藏）。"""
+    try:
+        if not global_latest:
+            return False
+        return (datetime.strptime(global_latest, "%Y-%m-%d")
+                - datetime.strptime(latest, "%Y-%m-%d")).days > max_days
+    except ValueError:
+        return False
+
+
 def _metrics(latest_db_date: str | None) -> list[dict]:
-    """首页关键指标卡数据（值/较昨日变化/近7日 sparkline/更新时间）。"""
+    """首页关键指标卡数据（值/较上一有效数据日期变化/近7日 spark/更新时间）。
+
+    取值规则：以该 product（product 留空时取整个 category）最近一个
+    price_date 为准；同一日期存在多个规格序列时取平均值——避免页面
+    结构调整后卡片停留在某个已断更的旧序列上。
+    涨跌幅 = (最新有效价 - 上一有效数据日期价格) / 上一有效价 × 100，
+    全部来自 DB 真实记录；spark_points 逐点带日期，可直接追溯。
+    """
     cfg = _portal_config()
     out = []
     for m in cfg.get("metrics") or []:
-        series = _trend_series(m.get("product"), m.get("category"))
-        if not series:
+        series_list = _trend_series(m.get("product") or None, m.get("category"))
+        series_list = [s for s in series_list if s["points"]]
+        if not series_list:
             continue
-        s = series[0]
-        pts = [p for p in s["points"] if p["average_price"] is not None]
-        if not pts:
+        # 按日期聚合所有序列：{date: [(avg, collected_at), ...]}
+        by_date: dict = {}
+        for s in series_list:
+            for p in s["points"]:
+                if p["average_price"] is None:
+                    continue
+                by_date.setdefault(p["price_date"], []).append(
+                    (p["average_price"], p["collected_at"]))
+        dates = sorted(by_date)
+        if not dates:
             continue
-        value = pts[-1]["average_price"]
-        prev = pts[-2]["average_price"] if len(pts) >= 2 else None
-        change = round(value - prev, 4) if value is not None and prev is not None else None
+        latest = dates[-1]
+        prev_date = dates[-2] if len(dates) >= 2 else None
+
+        def _day_avg(day: str) -> float:
+            vs = [v for v, _ in by_date[day]]
+            return sum(vs) / len(vs)
+
+        value = round(_day_avg(latest), 4)
+        prev = _day_avg(prev_date) if prev_date is not None else None
+        change = round(value - prev, 4) if prev is not None else None
         change_pct = round(change / prev * 100, 2) if change is not None and prev else None
+        updated = max((ts for _, ts in by_date[latest] if ts), default=None)
+        unit = next((s["unit"] for s in series_list
+                     if s["unit"] and s["points"][-1]["price_date"] == latest), "")
         out.append({
             "key": m.get("key"), "name": m.get("name"),
             "category": m.get("category"), "product": m.get("product"),
             "group": m.get("group"),
-            "unit": s["unit"],
+            "unit": unit,
             "value": value, "change": change, "change_pct": change_pct,
-            "sparkline": [p["average_price"] for p in pts[-7:]],
-            "price_date": pts[-1]["price_date"],
-            "updated_at": pts[-1]["collected_at"],
+            # sparkline 为兼容保留；spark_points 带日期，逐点可追溯到 DB 真实记录
+            "sparkline": [round(_day_avg(d), 4) for d in dates[-7:]],
+            "spark_points": [{"date": d, "value": round(_day_avg(d), 4)}
+                             for d in dates[-7:]],
+            "price_date": latest,
+            "prev_date": prev_date,
+            "is_stale": _is_stale(latest, latest_db_date),
+            "updated_at": updated,
         })
     return out
 
 
-def _rankings(limit: int = 5) -> dict:
-    """涨跌榜：DB 最近两个 price_date 的平均价变化前 N 涨/跌。"""
+def _rankings(limit: int = 5, as_of: str | None = None) -> dict:
+    """涨跌榜：as_of 基准日之前 DB 最近两个有数据日期的相邻价格变化。
+
+    规则（数据真实性要求）：
+    - 涨幅榜只含 pct > 0（降序）；跌幅榜只含 pct < 0（升序）；pct == 0 两榜都不进
+    - 不足 N 项就返回几项，绝不为了凑满把上涨/持平塞进跌幅榜
+    - 两榜天然互斥（pct>0 与 pct<0 不相交），同一产品不会同时上榜
+    - 次日采集模式：当天数据视为尚未发布，窗口取 as_of（默认服务器当天）
+      之前的最近两个有效 price_date，通过 based_on 标注供页面展示对比日期
+    """
+    if as_of is None:
+        as_of = datetime.now().strftime("%Y-%m-%d")
+    window = _db_query(
+        "SELECT DISTINCT price_date FROM lithium_spot_prices "
+        "WHERE price_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' "
+        "AND price_date < ? "
+        "ORDER BY price_date DESC LIMIT 2", (as_of,))
+    window_dates = [str(r["price_date"]) for r in window]
     rows = _db_query(
         "SELECT * FROM lithium_spot_prices WHERE validation_status != 'invalid' "
         "AND price_date IN (SELECT DISTINCT price_date FROM lithium_spot_prices "
-        "ORDER BY price_date DESC LIMIT 2) ORDER BY price_date")
+        "WHERE price_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' "
+        "AND price_date < ? "
+        "ORDER BY price_date DESC LIMIT 2) "
+        "ORDER BY price_date, collected_at DESC, id DESC", (as_of,))
     by_key: dict = {}
     for r in rows:
         key = (r["category"], r["product_name"], r.get("specification") or "", r.get("unit") or "")
@@ -550,10 +634,17 @@ def _rankings(limit: int = 5) -> dict:
         changes.append({"product": prod, "category": cat, "specification": spec,
                         "unit": unit, "value": last_v, "change": change,
                         "pct": pct, "prev_date": ds[-2], "date": ds[-1]})
-    changes.sort(key=lambda x: x["pct"], reverse=True)
+    gainers = sorted((c for c in changes if c["pct"] > 0),
+                     key=lambda x: x["pct"], reverse=True)[:limit]
+    losers = sorted((c for c in changes if c["pct"] < 0),
+                    key=lambda x: x["pct"])[:limit]
     return {
-        "top_gainers": changes[:limit],
-        "top_losers": sorted(changes, key=lambda x: x["pct"])[:limit],
+        "top_gainers": gainers,
+        "top_losers": losers,
+        "based_on": {
+            "date": window_dates[0] if window_dates else None,
+            "prev_date": window_dates[1] if len(window_dates) >= 2 else None,
+        },
     }
 
 
@@ -676,11 +767,15 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
                 return False
 
         # 管理员路径：服务端角色校验（前端隐藏按钮仅为体验优化）
-        if path == "/admin" or path.startswith("/api/admin/"):
+        # 含 /admin*、/api/admin/* 以及数据质量页（仅管理员可见）
+        is_admin_path = (path == "/admin" or path.startswith("/admin/")
+                         or path.startswith("/api/admin/")
+                         or path in ("/quality", "/api/quality"))
+        if is_admin_path:
             if sess["user"]["role"] != "admin":
                 self._forbidden(message="无管理员权限")
                 return False
-            if path == "/admin":
+            if path in ("/admin", "/admin/users"):
                 try:
                     AUTH_STORE.audit("ADMIN_PAGE_VIEW", sess["user"]["username"],
                                      self.client_address[0] if self.client_address else "")
@@ -728,6 +823,51 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
     def _clear_cookie_str(self) -> str:
         return f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
 
+    def _register_allowed(self, ip: str) -> bool:
+        """注册节流：同 IP 每小时最多成功注册 REGISTER_MAX_PER_HOUR 次。"""
+        now = time.time()
+        with _register_lock:
+            hits = _register_attempts.setdefault(ip, [])
+            _register_attempts[ip] = [t for t in hits if now - t < 3600]  # 顺带清理过期
+            return len(_register_attempts[ip]) < REGISTER_MAX_PER_HOUR
+
+    def _register_mark(self, ip: str) -> None:
+        with _register_lock:
+            _register_attempts.setdefault(ip, []).append(time.time())
+
+    def _handle_register(self):
+        """POST /api/auth/register（公开，CSRF 豁免——注册前尚无会话）。
+
+        安全要点：只读 username/password 两个字段，role 等其余字段一律忽略，
+        服务端强制 role='user'，前端无法注册管理员账号。
+        """
+        ip = self.client_address[0] if self.client_address else "?"
+        if not self._register_allowed(ip):
+            self._serve_json({"error": "注册过于频繁，请稍后再试"}, status=429)
+            return
+        body = self._read_json_body()
+        if not body:
+            self._serve_json({"error": "参数不完整"}, status=400)
+            return
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        try:
+            status, msg = AUTH_STORE.register_user(username, password)
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        if status == "duplicate":
+            self._serve_json({"error": msg}, status=409)
+            return
+        if status != "ok":
+            self._serve_json({"error": msg}, status=400)
+            return
+        self._register_mark(ip)  # 仅成功注册计数
+        ua = self.headers.get("User-Agent", "")
+        AUTH_STORE.audit("REGISTER", username, ip, ua)
+        AUTH_STORE.write_event("REGISTER", "info", f"新用户注册成功: {username}")
+        self._serve_json({"ok": True, "message": "注册成功，请登录"}, status=201)
+
     def _handle_login(self):
         """POST /api/auth/login（公开，CSRF 豁免——登录前尚无会话）。"""
         body = self._read_json_body()
@@ -746,6 +886,10 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - "
                   f"鉴权: 锁定拒绝 ip={ip} user={body['username']!r} 剩余{retry}s", flush=True)
             self._serve_json({"error": "尝试次数过多，请稍后再试", "retry_after": retry}, status=429)
+            return
+        if status == "disabled":
+            # 密码正确但账号被停用/注销（authenticate 仅在凭据有效时返回，防枚举）
+            self._serve_json({"error": "账号已停用"}, status=401)
             return
         if status != "ok" or user is None:
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - "
@@ -795,6 +939,76 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         # 改密后旧会话全部失效，强制重新登录
         self._serve_json({"ok": True, "message": msg},
                          extra_headers=[("Set-Cookie", self._clear_cookie_str())])
+
+    # ── 管理员：用户管理 ───────────────────────────────
+
+    def _handle_admin_users_get(self):
+        """GET /api/admin/users（闸门已做 role==admin 校验）。"""
+        try:
+            users = AUTH_STORE.list_users()
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        self._serve_json({"users": users})
+
+    def _handle_admin_users_post(self):
+        """POST /api/admin/users：{id, action∈disable|enable|reset_password|delete}。
+
+        防护：CSRF 必检；目标必须存在且 role=='user'（不能操作管理员账号）；
+        不能对自己操作。所有动作写审计与运维事件。
+        """
+        if not self._check_csrf():
+            self._serve_json({"error": "CSRF 校验失败"}, status=403)
+            return
+        body = self._read_json_body()
+        if not body or not isinstance(body.get("id"), int) or body.get("action") not in (
+                "disable", "enable", "reset_password", "delete"):
+            self._serve_json({"error": "参数不完整"}, status=400)
+            return
+        user_id, action = body["id"], body["action"]
+        try:
+            target = AUTH_STORE.get_user_by_id(user_id)
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        if target is None:
+            self._serve_json({"error": "目标用户不存在"}, status=400)
+            return
+        if target["role"] != "user":
+            self._serve_json({"error": "不能对管理员账号执行此操作"}, status=400)
+            return
+        if self._user and user_id == self._user["id"]:
+            self._serve_json({"error": "不能对自己执行此操作"}, status=400)
+            return
+        admin_username = self._user["username"] if self._user else "?"
+        ip = self.client_address[0] if self.client_address else ""
+        ua = self.headers.get("User-Agent", "")
+        detail = f"管理员操作目标用户: {target['username']}"
+        try:
+            if action == "disable":
+                ok, msg = AUTH_STORE.set_user_active(user_id, False), f"已停用用户 {target['username']}"
+                event = ("USER_DISABLED", "info", f"管理员 {admin_username} 停用用户 {target['username']}")
+            elif action == "enable":
+                ok, msg = AUTH_STORE.set_user_active(user_id, True), f"已启用用户 {target['username']}"
+                event = ("USER_ENABLED", "info", f"管理员 {admin_username} 启用用户 {target['username']}")
+            elif action == "reset_password":
+                ok, msg = AUTH_STORE.reset_user_password(user_id), \
+                    f"已重置用户 {target['username']} 的密码为 123456，该用户下次登录需修改密码"
+                event = ("USER_PASSWORD_RESET", "info",
+                         f"管理员 {admin_username} 重置用户 {target['username']} 的密码")
+            else:  # delete
+                ok, msg = AUTH_STORE.soft_delete_user(user_id), f"已删除用户 {target['username']}"
+                event = ("USER_DELETED", "info",
+                         f"管理员 {admin_username} 删除（注销）用户 {target['username']}")
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        if not ok:
+            self._serve_json({"error": "操作失败：目标用户不存在"}, status=400)
+            return
+        AUTH_STORE.audit("ADMIN_USER_" + action.upper(), admin_username, ip, ua, detail)
+        AUTH_STORE.write_event(event[0], event[1], event[2])
+        self._serve_json({"ok": True, "message": msg})
 
     def do_GET(self):
         """路由分发（安全闸 → 会话闸门 → 路由）。"""
@@ -865,6 +1079,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             except sqlite3.Error:
                 audit = []
             self._serve_json({"audit": audit})
+        elif path == "/api/admin/users":
+            self._handle_admin_users_get()
 
         # 门户 API
         elif path == "/api/files":
@@ -902,6 +1118,9 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/auth/login":
             self._handle_login()
             return
+        if path == "/api/auth/register":
+            self._handle_register()
+            return
 
         if not self._session_gate():
             return
@@ -910,6 +1129,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_logout()
         elif path == "/api/auth/change-password":
             self._handle_change_password()
+        elif path == "/api/admin/users":
+            self._handle_admin_users_post()
         else:
             self._serve_json({"error": "not found"}, status=404)
 
@@ -1087,7 +1308,7 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         return {
             "meta": {"generated_at": datetime.now().isoformat(timespec="seconds"), "source": "mixed"},
             "banner": {
-                "title": portal.get("title", "SMM 锂电价格与回收业务数据中心"),
+                "title": portal.get("title", "锂电价格与回收业务数据中心"),
                 "subtitle": portal.get("subtitle", ""),
             },
             "today_must_see": today,
@@ -1341,6 +1562,7 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             fs = man.get("fixed_summary") or {}
             today = {
                 "date": d,
+                "data_date": man.get("data_date"),
                 "collection_status": c.get("status"),
                 "expected": c.get("categories_expected", 0),
                 "success": c.get("categories_succeeded", 0),
@@ -1424,8 +1646,12 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
                     "category": p.get("category"), "product": p.get("product"),
                     "unit": s["unit"], "value": value,
                     "change_pct": pct,
+                    # sparkline 为兼容保留；spark_points 带日期，逐点可追溯
                     "sparkline": [x["average_price"] for x in pts[-7:]],
+                    "spark_points": [{"date": x["price_date"],
+                                      "value": x["average_price"]} for x in pts[-7:]],
                     "price_date": pts[-1]["price_date"],
+                    "prev_date": pts[-2]["price_date"] if len(pts) >= 2 else None,
                     "explanation": f"{p.get('category')} · {p.get('product')}",
                 })
             files = []
@@ -1485,7 +1711,7 @@ if __name__ == "__main__":
 
     with ReusableThreadingTCPServer(("0.0.0.0", PORT), DataCenterHandler) as httpd:
         # flush=True：stdout 非 TTY 时是块缓冲，不 flush 日志里看不到启动横幅
-        print("SMM 锂电价格与回收业务数据中心已启动", flush=True)
+        print("锂电价格与回收业务数据中心已启动", flush=True)
         print(f"  地址: http://0.0.0.0:{PORT}", flush=True)
         print(f"  数据根目录: {EXPORTS_ROOT}", flush=True)
         print(f"  鉴权: 表单登录 + 服务端 Session（账号库: {AUTH_DB}）", flush=True)

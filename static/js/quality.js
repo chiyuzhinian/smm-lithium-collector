@@ -33,6 +33,7 @@ function renderToday(t) {
   ${row("warning 行", t.warning ?? "—", "")}
   ${row("invalid 行", t.invalid ?? "—", t.invalid > 0 ? "bad" : "")}
   ${row("日期对齐率", t.date_alignment_ratio == null ? "—" : (t.date_alignment_ratio * 100).toFixed(1) + "%", t.date_alignment_ratio >= 0.8 ? "ok" : "warn")}
+  ${t.data_date && t.data_date !== t.date ? row("数据日期", Fmt.esc(t.data_date), "ok") : ""}
 </div>
 ${(t.reasons || []).length ? `<div class="q-reasons"><ul>${t.reasons.map((r) => `<li>⚠️ ${Fmt.esc(r)}</li>`).join("")}</ul></div>` : ""}`;
 }

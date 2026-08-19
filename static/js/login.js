@@ -12,6 +12,11 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
+  // 注册成功后回跳提示
+  if (location.search.includes("registered=1")) {
+    toast("注册成功，请登录", "ok");
+  }
+
   // 已登录则直接跳回
   API.me().then((me) => {
     if (me) location.replace(nextParam() || "/");

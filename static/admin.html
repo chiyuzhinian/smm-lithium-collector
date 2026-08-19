@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>系统运维中心 - SMM 锂电价格与回收业务数据中心</title>
+<title>系统运维中心 - 锂电价格与回收业务数据中心</title>
 <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body data-page="admin">
@@ -19,6 +19,7 @@
       <li><a href="#quality" data-tab="quality">✅ 数据质量</a></li>
       <li><a href="#resources" data-tab="resources">💻 系统资源</a></li>
       <li><a href="#logs" data-tab="logs">📜 运行日志</a></li>
+      <li><a href="#users" data-tab="users">👥 用户管理</a></li>
       <li><a href="#security" data-tab="security">🔐 账号安全</a></li>
     </ul>
   </aside>
@@ -91,6 +92,13 @@
       </div>
       <div class="log-note" id="log-path"></div>
       <pre class="log-view" id="log-view">加载中…</pre>
+    </section>
+
+    <!-- 用户管理 -->
+    <section class="admin-panel" id="panel-users" hidden>
+      <h2>用户管理</h2>
+      <p class="section-note">仅可操作普通用户（管理员账号与自身不可操作）。重置密码后初始密码为 123456，用户首次登录将被强制修改。删除为软删除，记录保留但无法登录。</p>
+      <div id="users-table"></div>
     </section>
 
     <!-- 账号安全 -->

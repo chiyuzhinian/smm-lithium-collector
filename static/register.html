@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>注册 - 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body data-page="register" class="login-body">
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-brand">⚡</div>
+    <h1>锂电价格与回收业务数据中心</h1>
+    <p class="login-sub">华友内部数据服务</p>
+    <form id="register-form">
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text" required autofocus autocomplete="username"
+             minlength="3" maxlength="30" pattern="[A-Za-z0-9_\-一-龥]{3,30}"
+             title="3-30 位字母、数字、下划线、连字符或中文">
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" required autocomplete="new-password"
+             minlength="8" maxlength="128" title="至少 8 位，最多 128 位">
+      <div class="login-error" id="register-error" hidden></div>
+      <button type="submit" class="btn btn-primary btn-block" id="register-btn">注 册</button>
+    </form>
+  </div>
+  <p class="login-foot">已有账号？<a href="/login">返回登录</a></p>
+  <p class="login-foot">数据来源：SMM 上海有色网公开报价（采集器自动采集） · 仅供内部使用</p>
+</div>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/register.js"></script>
+</body>
+</html>

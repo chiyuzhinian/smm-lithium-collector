@@ -13,7 +13,7 @@ from .exporter import export_daily
 from .logger import setup_logging
 from .network_capture import NetworkCapture
 from .parser import parse_html_tables,parse_category_section
-from .validator import validate_row,run_status
+from .validator import validate_row,run_status,modal_price_date
 
 def _safe_filename(name: str) -> str:
 	return re.sub(r'[<>:"/\\|?*\s]+', '_', name.strip())
@@ -26,7 +26,8 @@ def _ops_event(event_type: str, level: str, message: str) -> None:
 	except Exception:
 		pass
 
-async def collect(target_date: date, category=None, headed=False, dry_run=False):
+async def collect(target_date: date, category=None, headed=False, dry_run=False,
+                  calibrate_date=True):
 	cfg = load_config(); log = setup_logging(cfg.root)
 	if not cfg.target_url: raise RuntimeError("请在 .env 填写 SMM_TARGET_URL")
 	started = datetime.now(); stamp = started.strftime("%Y-%m-%d_%H%M%S")
@@ -53,7 +54,15 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 				await asyncio.sleep(1)
 			await page.wait_for_timeout(1000)
 			discovered = await discover_categories(page, h_sel)
-			if not discovered: raise RuntimeError("未发现分类")
+			if not discovered:
+				# 诊断优先：未发现分类时保存现场，便于排查登录态/页面结构问题
+				diag = cfg.root/"data/screenshots"/f"no_categories_{stamp}.png"
+				try:
+					await page.screenshot(path=str(diag), full_page=True)
+					diag.with_suffix(".html").write_text(await page.content(), encoding="utf-8")
+				except Exception as e:
+					log.warning("保存未发现分类诊断文件失败: %s", e)
+				raise RuntimeError("未发现分类")
 			log.info("发现%d个分类", len(discovered))
 			all_categories = [c for c in discovered if not category or c["name"]==category]
 		expected = [c["name"] for c in all_categories]
@@ -90,6 +99,18 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 	meta["finished_at"] = datetime.now().isoformat(timespec="seconds")
 	meta["total_raw_rows"] = sum(x["raw"] for x in meta.get("category_counts",{}).values())
 	meta["total_clean_rows"] = len(rows)
+	# 页面数据日期校准：SMM 未发布当日数据时页面仍是前一交易日数据（周一上午=上周五），
+	# 属正常现象。校验/门控/验证以页面数据日期为准，避免 FAIL 误报与临时快照噪音。
+	vcfg0 = cfg.settings.get("validation") or {}
+	if calibrate_date:
+		data_date = modal_price_date(rows, target_date,
+		                             max_stale_days=int(vcfg0.get("max_stale_data_days", 14)))
+		if data_date != target_date:
+			log.info("页面数据日期=%s（目标日期=%s），按页面日期校准", data_date, target_date)
+			rows = [validate_row(r, data_date) for r in rows]
+	else:
+		data_date = target_date
+	meta["data_date"] = str(data_date)
 	run_file = cfg.path("raw_dir")/f"{target_date:%Y/%m/%d}"/f"run_metadata_{stamp}.json"
 	run_file.parent.mkdir(parents=True, exist_ok=True)
 	run_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -122,7 +143,8 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 	meta["summary_gate"] = portal_cfg.get("summary_gate")
 	if rows:
 		try:
-			xlsx, csv = export_daily(rows, meta, cfg.path("export_dir"), target_date, db=db)
+			xlsx, csv = export_daily(rows, meta, cfg.path("export_dir"), target_date, db=db,
+		                         data_date=data_date)
 			log.info("导出：%s", xlsx)
 		except Exception: log.exception("导出失败")
 		try:
@@ -140,7 +162,8 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 			if vcfg.get("enabled", True):
 				from .daily_validation import run_daily_validation
 				vres = run_daily_validation(target_date, cfg.path("database_path"),
-				                            cfg.path("export_dir"), portal_cfg, vcfg)
+				                            cfg.path("export_dir"), portal_cfg, vcfg,
+				                            data_date=data_date)
 				meta["daily_validation"] = {"verdict": vres["verdict"],
 				                            "log_file": vres["log_file"]}
 				_ops_event("VALIDATION_VERDICT",
@@ -179,11 +202,15 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False)
 
 def cli():
 	p = argparse.ArgumentParser(description="SMM锂电现货每日采集")
-	p.add_argument("--date", type=date.fromisoformat, default=date.today())
+	p.add_argument("--date", type=date.fromisoformat, default=None)
 	p.add_argument("--category"); p.add_argument("--headed", action="store_true")
 	p.add_argument("--dry-run", action="store_true")
 	args = p.parse_args()
-	meta = asyncio.run(collect(args.date, args.category, args.headed, args.dry_run))
+	target_date = args.date or date.today()
+	# 定时任务不传 --date：按页面数据日期校准（当日未发布时按前一交易日）。
+	# 手动指定 --date：尊重显式日期，不校准。
+	meta = asyncio.run(collect(target_date, args.category, args.headed, args.dry_run,
+	                           calibrate_date=args.date is None))
 	raise SystemExit(0 if meta["status"]=="success" else 2 if meta["status"]=="partial_success" else 1)
 
 if __name__ == "__main__": cli()

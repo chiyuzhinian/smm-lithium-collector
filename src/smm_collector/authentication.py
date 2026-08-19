@@ -8,8 +8,12 @@ async def save_manual_login(config, context):
 
 async def looks_logged_out(page, config) -> bool:
     url = page.url.lower()
-    if config.login_url and url.rstrip("/") == config.login_url.lower().rstrip("/"): return True
-    signals = ["验证码", "短信验证", "滑块验证"]
+    if config.login_url:
+        base = config.login_url.lower().rstrip("/")
+        # 登录页常带 ?referer=...&errcode=10003 等查询串，用前缀匹配
+        if url.startswith(base) or base.startswith(url.rstrip("/")):
+            return True
+    signals = ["验证码", "短信验证", "滑块验证", "欢迎登录", "密码登录"]
     body = (await page.locator("body").inner_text())[:10000]
     return any(x in body for x in signals)
 

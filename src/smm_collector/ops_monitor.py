@@ -166,7 +166,7 @@ def collector_status(root: Path, config: dict, now: datetime | None = None) -> d
     out["manifest_exists"] = man is not None
     if man:
         c = man.get("collection") or {}
-        out.update(data_date=man.get("target_date") or man_date,
+        out.update(data_date=man.get("data_date") or man.get("target_date") or man_date,
                    expected=c.get("categories_expected", 0),
                    success=c.get("categories_succeeded", 0),
                    failed=c.get("categories_failed", 0),
@@ -254,15 +254,16 @@ def fixed_summary_status(root: Path, latest_manifest: dict | None,
 
 
 def expected_business_date(now: datetime, check_hour: int = 14) -> datetime.date:
-    """保守的期望业务日期：工作日且已过检查时点 → 当日；否则取最近一个工作日。"""
-    d = now.date()
-    if now.weekday() < 5 and now.hour >= check_hour:
-        candidate = d
-    else:
-        candidate = d - timedelta(days=1)
-    while candidate.weekday() >= 5:
-        candidate -= timedelta(days=1)
-    return candidate
+    """次日采集模式下的期望业务日期：今天之前最近的一个工作日。
+
+    每天 9:05 采集前一天数据，当天不采集当日数据，
+    因此任意时刻期望的数据日期都是「昨天以前最近的交易日」。
+    （check_hour 参数保留仅为兼容旧调用，不再使用。）
+    """
+    d = now.date() - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
 
 
 def data_date_status(root: Path, config: dict, now: datetime | None = None) -> dict:
@@ -272,7 +273,8 @@ def data_date_status(root: Path, config: dict, now: datetime | None = None) -> d
                      "SELECT MAX(price_date) AS d FROM lithium_spot_prices")
     db_latest = str(rows[0]["d"]) if rows and rows[0]["d"] else None
     manifests = _all_manifests(root)
-    man_latest = manifests[0][0] if manifests else None
+    man_date, man = (manifests[0] if manifests else (None, None))
+    man_latest = (man or {}).get("data_date") or man_date
     latest = max((d for d in (db_latest, man_latest) if d), default=None)
     expected = expected_business_date(now, int(config.get("freshness_check_hour", 14)))
     if latest is None:
@@ -480,7 +482,6 @@ def tasks(root: Path, config: dict, now: datetime | None = None) -> list[dict]:
                      " FROM collection_runs ORDER BY started_at")
     day_runs = [r for r in runs if r.get("target_date") == (man_date or "")]
     daily = day_runs[0] if day_runs else None
-    noon = day_runs[-1] if len(day_runs) >= 2 else None
     sync = _quality_report_sync(root, man_date)
     fs = (man or {}).get("fixed_summary") or {}
     metals = _metals_log_status(root, now)
@@ -507,7 +508,7 @@ def tasks(root: Path, config: dict, now: datetime | None = None) -> list[dict]:
                 "last_run": None, "status": "ok", "summary": "", "duration": None}
         source = t.get("source", "")
         if source == "manifest_run":
-            item.update(run_item(daily if key == "daily" else noon))
+            item.update(run_item(daily))
         elif source == "metals_log":
             item.update(metals)
         elif source == "validation_log":

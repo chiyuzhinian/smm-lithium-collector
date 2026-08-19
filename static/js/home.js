@@ -62,7 +62,10 @@ function renderMetrics(ov) {
   const el = document.getElementById("metric-grid");
   const ms = ov.metrics || [];
   if (!ms.length) { el.innerHTML = '<div class="empty-state">暂无指标数据</div>'; return; }
-  el.innerHTML = ms.map((m) => `
+  el.innerHTML = ms.map((m) => {
+    // 趋势线数据全部来自后端 spark_points（逐点带日期，可追溯到 DB 真实记录）
+    const sparkVals = (m.spark_points || []).map((p) => p.value);
+    return `
 <div class="metric-card">
   <div class="metric-head">
     <span class="metric-name">${Fmt.esc(m.name)}</span>
@@ -70,11 +73,12 @@ function renderMetrics(ov) {
   </div>
   <div class="metric-value">${Fmt.price(m.value)}<span class="metric-unit">${Fmt.esc(m.unit || "")}</span></div>
   <div class="metric-change">
-    <span class="${Fmt.cls(m.change_pct)}">${m.change_pct === null || m.change_pct === undefined ? "—" : "较昨日 " + Fmt.pct(m.change_pct)}</span>
+    <span class="${Fmt.cls(m.change_pct)}">${m.change_pct === null || m.change_pct === undefined ? "—" : "较上次 " + (m.prev_date ? "(" + String(m.prev_date).slice(5) + ") " : "") + Fmt.pct(m.change_pct)}</span>
   </div>
-  <div class="metric-spark" data-spark="${Fmt.esc(JSON.stringify(m.sparkline || []))}"></div>
-  <div class="metric-time">更新：${Fmt.esc(m.updated_at || "—")}</div>
-</div>`).join("");
+  <div class="metric-spark" data-spark="${Fmt.esc(JSON.stringify(sparkVals))}"></div>
+  <div class="metric-time">数据日期：${Fmt.esc(m.price_date || "—")}${m.is_stale ? '<span class="label-warn">数据较旧</span>' : ""} · 更新时间：${Fmt.esc(m.updated_at || "—")}</div>
+</div>`;
+  }).join("");
   el.querySelectorAll(".metric-spark").forEach((d) => {
     try { renderSparkline(d, JSON.parse(d.dataset.spark)); } catch (e) { /* ignore */ }
   });

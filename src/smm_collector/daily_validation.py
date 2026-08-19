@@ -578,11 +578,14 @@ def _write_logs(result: dict, cfg: dict) -> Path:
 
 
 def run_daily_validation(target_date, db_path=None, export_root=None,
-                         portal_cfg=None, vcfg=None) -> dict:
+                         portal_cfg=None, vcfg=None, data_date=None) -> dict:
     """对指定业务日期执行 9 层验证，返回结果并写 logs/validation/。
 
     参数：
-      target_date: str|date 业务日期（YYYY-MM-DD）
+      target_date: str|date 业务日期（YYYY-MM-DD，决定文件/manifest 路径）
+      data_date: str|date 页面数据日期校准后的数据日期（可选）；
+                 date/volatility/continuity 层以它为准（SMM 当日未发布时页面
+                 仍是前一交易日数据，属正常现象，不应判 FAIL）
       db_path: SQLite 路径（只读打开，默认 data/database/smm_lithium.db）
       export_root: 导出根目录（默认 data/exports）
       portal_cfg: categories_portal.yaml 内容（默认自动读取）
@@ -590,6 +593,7 @@ def run_daily_validation(target_date, db_path=None, export_root=None,
     """
     cfg = _merge_config(vcfg)
     target = str(target_date)
+    effective = str(data_date) if data_date else target
     export_root = Path(export_root or _PROJECT_ROOT / "data" / "exports")
     db_path = Path(db_path or _PROJECT_ROOT / "data" / "database" / "smm_lithium.db")
     portal = portal_cfg if portal_cfg is not None else load_portal_config(_PROJECT_ROOT)
@@ -599,12 +603,12 @@ def run_daily_validation(target_date, db_path=None, export_root=None,
     layers = {
         "file": _check_files(export_root, target, issues),
         "schema": _check_schema(rows, issues),
-        "date": _check_dates(rows, target, portal, issues),
+        "date": _check_dates(rows, effective, portal, issues),
         "dedup": _check_duplicates(rows, issues),
         "categories": _check_categories(rows, portal, issues),
         "numeric": _check_numeric(rows, portal, issues),
-        "volatility": _check_volatility(db_path, target, cfg, issues),
-        "continuity": _check_continuity(db_path, target, cfg, issues),
+        "volatility": _check_volatility(db_path, effective, cfg, issues),
+        "continuity": _check_continuity(db_path, effective, cfg, issues),
         "fixed_summary": _check_fixed_summary(db_path, export_root, issues),
     }
     counts = Counter(i["level"] for i in issues)
@@ -613,6 +617,7 @@ def run_daily_validation(target_date, db_path=None, export_root=None,
     result = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "date": target,
+        "data_date": str(data_date) if data_date else None,
         "verdict": verdict,
         "layers": layers,
         "issues": issues,

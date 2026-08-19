@@ -1,6 +1,6 @@
 from __future__ import annotations
 import json, sqlite3, time
-from datetime import datetime
+from datetime import date, datetime
 
 SCHEMA="""
 CREATE TABLE IF NOT EXISTS lithium_spot_prices (
@@ -33,9 +33,13 @@ class Database:
 			try:
 				with self.connect() as con:
 					for row in rows:
+						# price_date 缺失时写 ''（列 NOT NULL）——不能写 'None'：
+						# SQLite 文本排序中 'None' > 任何真实日期，会污染 MAX(price_date)
+						pd = row.get("price_date")
+						pd_str = pd.isoformat() if isinstance(pd, date) else str(pd or "")
 						key = (row["source"], row["market"], row["category"],
 						       row["product_name"], row.get("specification") or "",
-						       row.get("unit") or "", str(row["price_date"]))
+						       row.get("unit") or "", pd_str)
 						old = con.execute(
 							"SELECT id,record_hash FROM lithium_spot_prices "
 							"WHERE source=? AND market=? AND category=? AND product_name=? "

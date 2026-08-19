@@ -3,7 +3,7 @@
 
 (function () {
   const POLL_MS = 30000; // 30 秒轮询，与服务端聚合缓存同频
-  const TABS = ["overview", "tasks", "quality", "resources", "logs", "security"];
+  const TABS = ["overview", "tasks", "quality", "resources", "logs", "users", "security"];
   const CARD_ORDER = ["web", "collector", "data_date", "validation", "fixed_summary", "disk", "mem", "cpu"];
 
   /* ── Tab 切换 ── */
@@ -18,6 +18,7 @@
     if (name === "quality") loadQuality();
     if (name === "resources") loadResources();
     if (name === "logs") initLogs();
+    if (name === "users") loadUsers();
     if (name === "security") loadAudit();
   }
   document.querySelectorAll(".admin-nav a").forEach((a) => {
@@ -233,6 +234,60 @@
     } catch (e) { /* ignore */ }
   }
 
+  /* ── 用户管理（服务端已做 role 校验；此处仅渲染） ── */
+  const ROLE_TEXT = { user: "普通用户", admin: "管理员" };
+  async function loadUsers() {
+    try {
+      const d = await API.get("/api/admin/users", 0);
+      const rows = d.users || [];
+      document.getElementById("users-table").innerHTML = rows.length
+        ? `<table class="admin-table"><thead><tr><th>用户名</th><th>角色</th><th>状态</th>` +
+          `<th>注册时间</th><th>最近登录</th><th>操作</th></tr></thead><tbody>` +
+          rows.map((u) => {
+            const status = u.is_active
+              ? `<span class="badge-ok">✔ 正常</span>`
+              : `<span class="badge-warn">⏸ 已停用</span>`;
+            const ops = [];
+            if (u.is_active) {
+              ops.push(`<button class="btn btn-small" data-op="disable" data-id="${u.id}">停用</button>`);
+            } else {
+              ops.push(`<button class="btn btn-small" data-op="enable" data-id="${u.id}">启用</button>`);
+            }
+            ops.push(`<button class="btn btn-small" data-op="reset_password" data-id="${u.id}">重置密码</button>`);
+            ops.push(`<button class="btn btn-small" data-op="delete" data-id="${u.id}">删除</button>`);
+            return `<tr data-username="${Fmt.esc(u.username)}">` +
+              `<td>${Fmt.esc(u.username)}</td>` +
+              `<td>${Fmt.esc(ROLE_TEXT[u.role] || u.role)}</td>` +
+              `<td>${status}</td>` +
+              `<td>${Fmt.esc(u.created_at || "—")}</td>` +
+              `<td>${Fmt.esc(u.last_login_at || "—")}</td>` +
+              `<td>${ops.join(" ")}</td></tr>`;
+          }).join("") + "</tbody></table>"
+        : '<div class="empty-state"><div class="empty-icon">👥</div><div>暂无用户</div></div>';
+      document.querySelectorAll("#users-table button[data-op]").forEach((b) => {
+        b.addEventListener("click", () => userAction(b.dataset.op, Number(b.dataset.id),
+          b.closest("tr").dataset.username));
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  const ACTION_CONFIRM = {
+    disable: "确定停用该用户？其所有会话将立即失效。",
+    enable: "确定启用该用户？",
+    reset_password: "确定重置该用户密码为 123456？该用户下次登录将被强制修改密码。",
+    delete: "确定删除（注销）该用户？删除后无法登录，且不可恢复。",
+  };
+  async function userAction(action, id, username) {
+    if (!confirm(`用户「${username}」：${ACTION_CONFIRM[action] || "确定执行此操作？"}`)) return;
+    try {
+      const data = await API.post("/api/admin/users", { id, action });
+      toast(data.message || "操作成功", "ok");
+      loadUsers();
+    } catch (err) {
+      toast((err.data && err.data.error) || "操作失败", "");
+    }
+  }
+
   /* ── 账号安全 ── */
   async function loadAudit() {
     try {
@@ -269,7 +324,8 @@
 
   /* ── 启动 ── */
   loadOverview();
-  const initial = location.hash.replace("#", "");
+  // /admin/users 直达用户管理 tab（页面由服务端闸门校验）
+  const initial = location.pathname === "/admin/users" ? "users" : location.hash.replace("#", "");
   showTab(TABS.includes(initial) ? initial : "overview");
   document.getElementById("refresh-btn").addEventListener("click", () => {
     loadOverview();

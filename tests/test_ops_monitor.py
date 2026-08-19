@@ -70,12 +70,12 @@ RUN_OK = {"started_at": "2026-08-13T10:00:01", "finished_at": "2026-08-13T10:02:
 
 class TestExpectedBusinessDate:
     @pytest.mark.parametrize("now,expected", [
-        (datetime(2026, 8, 13, 15, 0), "2026-08-13"),   # 周四 15:00 → 当日
-        (datetime(2026, 8, 13, 9, 0), "2026-08-12"),    # 周四 9:00（未到检查时点）→ 周三
+        (datetime(2026, 8, 13, 15, 0), "2026-08-12"),   # 周四 15:00 → 周三（次日采集模式）
+        (datetime(2026, 8, 13, 9, 0), "2026-08-12"),    # 周四 9:00 → 周三
         (datetime(2026, 8, 15, 15, 0), "2026-08-14"),   # 周六 → 周五
         (datetime(2026, 8, 16, 15, 0), "2026-08-14"),   # 周日 → 周五
         (datetime(2026, 8, 17, 9, 0), "2026-08-14"),    # 周一 9:00 → 上周五
-        (datetime(2026, 8, 17, 15, 0), "2026-08-17"),   # 周一 15:00 → 当日
+        (datetime(2026, 8, 17, 15, 0), "2026-08-14"),   # 周一 15:00 → 上周五（当天不采当日）
     ])
     def test_expected_date(self, now, expected):
         assert str(ops_monitor.expected_business_date(now, 14)) == expected

@@ -1,5 +1,5 @@
 # ============================================================
-# SMM 锂电价格与回收业务数据中心 — 门户与固定汇总门控统一配置
+# 锂电价格与回收业务数据中心 — 门户与固定汇总门控统一配置
 # ============================================================
 # 本文件同时驱动：
 #   1) 前端门户（业务分组 A-F、首页指标卡、业务专题、文案）
@@ -10,7 +10,7 @@
 # ============================================================
 
 portal:
-  title: "SMM 锂电价格与回收业务数据中心"
+  title: "锂电价格与回收业务数据中心"
   subtitle: "聚焦锂电价格、材料价格、基础金属与回收链价格数据，支持每日下载、历史归档与业务分析。"
   company: "华友"
 
@@ -101,14 +101,17 @@ groups:
     categories: [焦类, 磷矿, 磷化工, 电池舱, 碳素, 电炉钢]
 
 # ── 固定汇总门控阈值 ──
-# 日期对齐率 = 行中 price_date==target_date 的占比。
-# 注意：页面含周更品种（电芯周/铜箔加工费周等），其行日期天然滞后，
-# 健康同日采集的对齐率实测约 0.74（325/438），次日早采≈0 → 阈值取 0.6 留余量。
+# 日期对齐率 = 行中 price_date==数据日期（页面数据日期校准后的众数）的占比。
+# 页面含周更品种（电芯周/铜箔加工费周等），其行日期天然滞后：
+# 健康同日采集的对齐率实测约 0.74（325/438），次日早采（页面为前一交易日数据）≈0.93
+# → 阈值取 0.6 留余量。SMM 当日未发布时按页面日期校准，不产生 temp_snapshot。
 summary_gate:
-  min_date_alignment_ratio: 0.6    # price_date==target 行占比下限
+  min_date_alignment_ratio: 0.6    # price_date==data_date 行占比下限
   max_invalid_ratio: 0.05          # invalid 行占比上限
 
-# ── 首页关键指标卡（12 张；product 为 lithium_spot_prices.product_name 精确值） ──
+# ── 首页关键指标卡（12 张；product 为 lithium_spot_prices.product_name 精确值，留空=整分类均价） ──
+# 注意：隔膜品类 2026-07 起页面产品名改为 湿法基膜/干法基膜/涂覆基膜 等（原「隔膜」汇总行下线），
+# 故 product 留空按整分类取价，避免卡片停留在旧序列。
 metrics:
   - {key: lce_battery,          name: "电池级碳酸锂",   category: 锂化合物,       product: "电池级碳酸锂",           group: A}
   - {key: lh_battery,           name: "电池级氢氧化锂", category: 锂化合物,       product: "电池级氢氧化锂（粗颗粒）", group: A}
@@ -116,7 +119,7 @@ metrics:
   - {key: ncm523,               name: "三元材料5系",    category: 正极材料,       product: "5系三元材料",            group: B}
   - {key: lfp_cell,             name: "方形LFP电芯",    category: 电芯,           product: "方形磷酸铁锂电芯(周)",    group: C}
   - {key: electrolyte,          name: "电解液",         category: 电解液,         product: "电解液",                 group: C}
-  - {key: separator,            name: "隔膜",           category: 隔膜,           product: "隔膜",                   group: C}
+  - {key: separator,            name: "隔膜",           category: 隔膜,           product: "",                      group: C}
   - {key: copper,               name: "1#电解铜",       category: 基础金属,       product: "1#电解铜",               group: D}
   - {key: aluminum,             name: "A00铝",          category: 基础金属,       product: "A00铝",                  group: D}
   - {key: nickel,               name: "1#电解镍",       category: 基础金属,       product: "1#电解镍",               group: D}
@@ -183,9 +186,11 @@ topics:
       - {category: 废旧正极片及系数, product: "废旧磷酸铁锂动力正极片"}
 
 
-# ── 门户账号与会话（2026-08-13 起：表单登录 + 服务端 Session，替代 HTTP Basic） ──
+# ── 门户账号与会话（表单登录 + 服务端 Session） ──
 # 账号（huayou/admin）与密码哈希保存在 /var/lib/smm-fileserver/auth.db（0600，Web 不可达），
 # 本文件不存任何凭据。初始化/重置：python scripts/init_auth.py
+# 自助注册：/register，仅用户名+密码，服务端强制 role=user（忽略前端 role 参数）
+# 管理员用户管理：/admin/users（停用/启用/重置密码为 123456/软删除）
 auth:
   session_ttl_hours: 10          # 普通用户会话有效期
   admin_session_ttl_hours: 4     # 管理员会话有效期
@@ -205,7 +210,7 @@ health:
   load_warn: 3.0                 # 1 分钟 load average（2 核机器）
   load_crit: 4.0
   collector_timeout_minutes: 45  # 采集运行超过该时长 → 警告（只提示不杀进程）
-  freshness_check_hour: 14       # 工作日超过该时点仍未产出当日数据 → 「数据可能未及时更新」警告
+  freshness_check_hour: 14       # 已废弃：次日采集模式下期望日期=前一交易日，不再按时点判定
 
 # ── 管理员日志查看白名单（{date} 只由服务器时钟推导，绝不接受客户端路径） ──
 admin:
@@ -220,9 +225,7 @@ admin:
 
 # ── 定时任务表（与 scripts/install_cron.sh 保持同步；运维中心「采集任务」页展示） ──
 tasks:
-  - {key: daily,         name: "每日采集(早采)",       cron: "0 10 * * 1-5",  source: manifest_run}
-  - {key: metals,        name: "铜铝镍补采",           cron: "0 11 * * 1-5",  source: metals_log}
-  - {key: noon,          name: "全量兜底(含验证/汇总)", cron: "30 12 * * 1-5", source: manifest_run}
+  - {key: daily,         name: "每日采集(前一天数据)", cron: "5 9 * * 1-5",  source: manifest_run}
   - {key: validation,    name: "数据验证",             cron: "",               source: validation_log}
   - {key: fixed_summary, name: "固定汇总更新",         cron: "",               source: fixed_summary}
   - {key: mysql_sync,    name: "MySQL 同步",           cron: "",               source: quality_sync}

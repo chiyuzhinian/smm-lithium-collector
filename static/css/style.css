@@ -664,6 +664,8 @@ body {
   padding: 1rem 1.1rem; box-shadow: var(--shadow);
 }
 .rank-title { font-size: 0.9rem; font-weight: 700; margin-bottom: 0.6rem; }
+.rank-range { font-size: 0.72rem; font-weight: 500; color: var(--text-secondary); margin-left: 0.4rem; }
+.rank-note { font-size: 0.75rem; color: var(--text-secondary); padding-top: 0.5rem !important; }
 .rank-table { width: 100%; border-collapse: collapse; }
 .rank-table td { padding: 0.4rem 0.3rem; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
 .rank-table tr:last-child td { border-bottom: none; }

@@ -21,13 +21,10 @@ NC='\033[0m'
 MODE="${1:-install}"
 
 # ── 定时任务内容 ──────────────────────────────────────────────
-# SMM 锂电现货发布时间不固定（实测 10:17~12:04 均出现过），故：
-#   10:00 早采（发布早时可当日入库）
-#   11:00 铜铝镍延迟补采（retry_metals.py）
-#   12:30 全量兜底重跑（当日数据未发布时正式固定汇总不更新，靠这次兜底）
-CRON_DAILY="0 10 * * 1-5 /bin/bash ${ROOT}/scripts/run_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
-CRON_METALS="0 11 * * 1-5 ${ROOT}/.venv/bin/python ${ROOT}/scripts/retry_metals.py >> ${ROOT}/logs/cron_metals.log 2>&1"
-CRON_NOON="30 12 * * 1-5 /bin/bash ${ROOT}/scripts/run_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
+# 次日采集模式：每天 9:05 采集前一天（页面有数据的最近交易日）数据，
+# 当天不采集当日数据（周五数据周一早上入库）。采集内含页面数据日期校准、
+# 验证、固定汇总门控、MySQL 同步，无需当天的兜底/补采任务。
+CRON_DAILY="5 9 * * 1-5 /bin/bash ${ROOT}/scripts/run_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
 MARKER="# SMM 锂电采集定时任务（由 install_cron.sh 管理）"
 
 # ── 生成新的 crontab ──────────────────────────────────────────
@@ -36,8 +33,6 @@ gen_crontab() {
     echo ""
     echo "$MARKER"
     echo "$CRON_DAILY"
-    echo "$CRON_METALS"
-    echo "$CRON_NOON"
 }
 
 # ── 移除 SMM 任务 ────────────────────────────────────────────

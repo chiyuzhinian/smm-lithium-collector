@@ -95,23 +95,36 @@ window.addEventListener("resize", () => {
   document.querySelectorAll("[data-chart]").forEach((el) => { if (el._chart) el._chart.resize(); });
 });
 
-/* ── 涨跌榜表格 ─────────────────────────────────────────── */
-function renderRankTable(el, gainers, losers) {
+/* ── 涨跌榜表格（数据全部来自后端 _rankings：涨幅榜仅 pct>0、跌幅榜仅 pct<0） ── */
+function renderRankTable(el, gainers, losers, opts) {
   if (!el) return;
-  const row = (r, i) => `
+  opts = opts || {};
+  const based = opts.based_on || {};
+  const rangeTag = (based.date && based.prev_date)
+    ? `<span class="rank-range">对比 ${String(based.prev_date).slice(5)} → ${String(based.date).slice(5)}</span>`
+    : "";
+  const col = (list, emptyText, noteText) => {
+    const rows = (list || []).map((r, i) => `
 <tr>
   <td class="rank-no">${i + 1}</td>
   <td><div class="rank-name">${Fmt.esc(r.product)}</div><div class="rank-sub">${Fmt.esc(r.category || "")}</div></td>
   <td class="num">${Fmt.price(r.value)}</td>
   <td class="${Fmt.cls(r.pct)}">${Fmt.pct(r.pct)}</td>
-</tr>`;
+</tr>`).join("");
+    const body = rows ||
+      `<tr><td colspan="4" class="empty">${emptyText}</td></tr>`;
+    const note = (list && list.length > 0 && list.length < 5)
+      ? `<tr><td colspan="4" class="rank-note">${noteText.replace("{n}", list.length)}</td></tr>`
+      : "";
+    return body + note;
+  };
   el.innerHTML = `
 <div class="rank-col">
-  <div class="rank-title up">📈 今日涨幅前5</div>
-  <table class="rank-table"><tbody>${(gainers || []).map(row).join("") || '<tr><td colspan="4" class="empty">暂无数据</td></tr>'}</tbody></table>
+  <div class="rank-title up">📈 今日涨幅前5${rangeTag}</div>
+  <table class="rank-table"><tbody>${col(gainers, "今日无上涨产品", "今日仅{n}项价格上涨")}</tbody></table>
 </div>
 <div class="rank-col">
-  <div class="rank-title down">📉 今日跌幅前5</div>
-  <table class="rank-table"><tbody>${(losers || []).map(row).join("") || '<tr><td colspan="4" class="empty">暂无数据</td></tr>'}</tbody></table>
+  <div class="rank-title down">📉 今日跌幅前5${rangeTag}</div>
+  <table class="rank-table"><tbody>${col(losers, "今日无下跌产品", "今日仅{n}项价格下跌")}</tbody></table>
 </div>`;
 }

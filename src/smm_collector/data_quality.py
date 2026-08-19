@@ -57,12 +57,13 @@ def generate_status_manifest(meta: dict, rows: list[dict], summary_decision: dic
 	日期对齐率、当日全部 runs、固定汇总决策与状态、生成时间。
 	"""
 	target = str(meta.get("target_date") or date.today().isoformat())
+	data_date = str(meta.get("data_date") or target)
 	decision = summary_decision or {}
 	n = len(rows)
 	valid = sum(1 for r in rows if r.get("validation_status") == "valid")
 	invalid = sum(1 for r in rows if r.get("validation_status") == "invalid")
 	warning = n - valid - invalid
-	align = sum(1 for r in rows if str(r.get("price_date", "")) == target)
+	align = sum(1 for r in rows if str(r.get("price_date", "")) == data_date)
 
 	formal_updated_at = None
 	if export_root:
@@ -73,6 +74,7 @@ def generate_status_manifest(meta: dict, rows: list[dict], summary_decision: dic
 	manifest = {
 		"generated_at": datetime.now().isoformat(timespec="seconds"),
 		"target_date": target,
+		"data_date": data_date,
 		"collection": {
 			"status": meta.get("status", "unknown"),
 			"categories_expected": len(meta.get("expected_categories", [])),

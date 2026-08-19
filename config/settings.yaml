@@ -28,6 +28,7 @@ validation:
   max_report_items: 20           # 每个告警最多记录明细条数
   log_dir: "logs/validation"     # 验证日志目录（不在 Web 根，不对公网开放）
   category_overrides: {}         # 按分类覆盖波动阈值，如 {锂化合物: {warning_pct: 15.0}}
+  max_stale_data_days: 14        # 页面数据日期校准上限：页面价格日期早于目标日期超过 N 天视为异常不校准；0=禁用校准
 collector:
   max_retries: 3
   retry_base_seconds: 3

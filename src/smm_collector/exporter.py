@@ -45,6 +45,22 @@ SUMMARY_KEYS = ["source", "market", "category", "product_name", "specification",
 _STATUS_RANK = {"valid": 0, "warning": 1, "invalid": 2}
 
 
+def _normalize_merge_inputs(df: pd.DataFrame) -> pd.DataFrame:
+	"""Excel 往返会改变数据类型，导致增量合并时去重键无法碰撞
+	（历史/固定汇总重复膨胀）。归一化两类差异：
+	  - price_date：datetime 对象 → ISO 日期字符串（date 对象同值不同型）
+	  - 空字符串 → NaN（字符串键列）"""
+	if df.empty:
+		return df
+	df = df.copy()
+	df["price_date"] = (pd.to_datetime(df["price_date"], errors="coerce")
+	                    .dt.strftime("%Y-%m-%d").fillna(""))
+	for c in ("source", "market", "category", "product_name", "specification", "unit"):
+		if c in df.columns:
+			df[c] = df[c].fillna("")
+	return df
+
+
 def _dedup_quality(rows: list[dict]) -> list[dict]:
 	"""质量感知去重：同业务键多行时优先 valid，其次 warning，同级取 collected_at 最新。
 
@@ -165,6 +181,7 @@ def update_summaries(rows, meta, export_root: Path, target_date,
 		history = export_root / "SMM锂电现货价格_历史汇总.xlsx"
 		base_df = build_summary_dataframe(rows)
 		old = pd.read_excel(history) if history.exists() else pd.DataFrame(columns=COLUMNS)
+		old, base_df = _normalize_merge_inputs(old), _normalize_merge_inputs(base_df)
 		merged = _dedup_quality(pd.concat([old, base_df], ignore_index=True).to_dict("records"))
 		merged = pd.DataFrame(merged)[COLUMNS]
 		htmp = history.with_suffix(".tmp.xlsx")
@@ -190,7 +207,8 @@ def update_summaries(rows, meta, export_root: Path, target_date,
 	return result
 
 
-def export_daily(rows, meta, export_root: Path, target_date, db=None):
+def export_daily(rows, meta, export_root: Path, target_date, db=None, data_date=None):
+	"""每日导出。文件命名按运行日 target_date；门控/规范日报/固定汇总按数据日期 data_date。"""
 	out = export_root / f"{target_date:%Y}" / f"{target_date:%m}"
 	out.mkdir(parents=True, exist_ok=True)
 	summary_dir = out / "每日汇总"; summary_dir.mkdir(parents=True, exist_ok=True)
@@ -220,8 +238,9 @@ def export_daily(rows, meta, export_root: Path, target_date, db=None):
 		df_raw.to_excel(writer, index=False, sheet_name="全部数据")
 		for cat in cats_in_data:
 			df_raw[df_raw.category == cat].to_excel(writer, index=False, sheet_name=_excel_sheet_name(cat))
-		pd.DataFrame({"项目":["数据来源","采集日期","成功分类","数据行数"],
-			"内容":["SMM",str(target_date),f"{len(meta.get('success_categories',[]))}个分类",f"{len(rows)}条"]}
+		pd.DataFrame({"项目":["数据来源","采集日期","数据日期","成功分类","数据行数"],
+			"内容":["SMM",str(target_date),str(data_date or target_date),
+			       f"{len(meta.get('success_categories',[]))}个分类",f"{len(rows)}条"]}
 		).to_excel(writer, index=False, sheet_name="采集说明")
 	_style(daily_tmp); os.replace(daily_tmp, daily_xlsx)
 
@@ -229,7 +248,7 @@ def export_daily(rows, meta, export_root: Path, target_date, db=None):
 	try:
 		from .business_report import build_report, write_report_sheet
 		all_smm = db.get_all_records() if db else rows
-		report_df, quality = build_report(all_smm, target_date=target_date)
+		report_df, quality = build_report(all_smm, target_date=(data_date or target_date))
 		report_xlsx = excel_dir / f"SMM锂电现货价格_规范日报_{target_date}.xlsx"
 		with pd.ExcelWriter(report_xlsx, engine="openpyxl") as rw:
 			write_report_sheet(rw, report_df)
@@ -239,7 +258,7 @@ def export_daily(rows, meta, export_root: Path, target_date, db=None):
 
 	# 历史汇总 + 固定汇总（门控决策；canonical/gate 由 meta 传入，缺省走旧门兼容）
 	meta["summary_decision"] = update_summaries(
-		rows, meta, export_root, target_date,
+		rows, meta, export_root, data_date or target_date,
 		canonical_categories=meta.get("canonical_categories"),
 		gate=meta.get("summary_gate"))
 

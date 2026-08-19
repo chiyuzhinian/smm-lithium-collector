@@ -1,4 +1,5 @@
 from __future__ import annotations
+from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -93,6 +94,28 @@ def validate_row(row: dict, target_date: date | None = None) -> dict:
     row["validation_status"] = status
     row["validation_message"] = "；".join(invalid + warnings)
     return row
+
+
+def modal_price_date(rows: list[dict], fallback: date, max_stale_days: int = 14) -> date:
+    """页面数据日期校准：取 rows 中 price_date 的众数作为「数据日期」。
+
+    SMM 在当日发布时间窗（约 10:00~12:30）之前，页面展示的是上一交易日数据，
+    属正常现象（如周一上午=上周五）。校验/门控/验证以数据日期为准，避免误报。
+
+    回退条件（真异常，保持门控拦截能力）：
+      - 无任何可解析日期 → fallback
+      - 众数晚于 fallback（未来日期异常）→ fallback
+      - 众数早于 fallback 超过 max_stale_days（页面异常陈旧，疑似解析损坏）→ fallback
+    """
+    dates = [r["price_date"] for r in rows if isinstance(r.get("price_date"), date)]
+    if not dates:
+        return fallback
+    modal = Counter(dates).most_common(1)[0][0]
+    if modal > fallback:
+        return fallback
+    if (fallback - modal).days > max_stale_days:
+        return fallback
+    return modal
 
 
 def check_price_volatility(

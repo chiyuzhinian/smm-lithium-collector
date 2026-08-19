@@ -314,7 +314,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_daily_task.ps1
 
 - 账号：`huayou`（普通用户）/ `admin`（管理员），初始密码首登强制修改
 - 账号库 `/var/lib/smm-fileserver/auth.db`（PBKDF2 哈希，0600，Web 不可达）；初始化：`.venv/bin/python scripts/init_auth.py`
-- 未登录只能访问 `/login` 与 `/health`；全部页面/API/Excel 下载均需登录；`/admin` 与 `/api/admin/*` 服务端校验管理员角色
+- 未登录只能访问 `/login`、`/register` 与 `/health`；全部页面/API/Excel 下载均需登录；`/admin*`、`/api/admin/*`、`/quality` 服务端校验管理员角色
+- **自助注册** `/register`（仅用户名+密码，服务端强制 role=user，忽略前端传入的任何角色参数；同 IP 每小时限 5 个）
+- **管理员用户管理** `/admin/users`：用户列表、停用/启用、重置密码（统一重置为 123456 并强制首登改密）、软删除
 - 管理员运维中心 `/admin`：采集器/验证器/固定汇总/CPU/内存/磁盘/定时任务/日志/审计监控（阈值在 `config/categories_portal.yaml` 的 `auth`/`health`/`admin`/`tasks` 段）
 - systemd 单元需含 `StateDirectory=smm-fileserver` + `StateDirectoryMode=0700`
 - 安全建议：长期生产请加 Nginx + HTTPS 并把 `auth.cookie_secure` 改为 `true`

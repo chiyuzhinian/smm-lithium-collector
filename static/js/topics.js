@@ -68,14 +68,17 @@ async function renderTopic(key) {
   // 产品指标卡
   const me = el.querySelector("#tp-metrics");
   const products = t.products || [];
-  me.innerHTML = products.map((p) => `
+  me.innerHTML = products.map((p) => {
+    const sparkVals = (p.spark_points || []).map((x) => x.value);
+    return `
 <div class="metric-card">
   <div class="metric-head"><span class="metric-name">${Fmt.esc(p.product)}</span><span class="metric-sub">${Fmt.esc(p.category || "")}</span></div>
   <div class="metric-value">${Fmt.price(p.value)}<span class="metric-unit">${Fmt.esc(p.unit || "")}</span></div>
-  <div class="metric-change"><span class="${Fmt.cls(p.change_pct)}">${p.change_pct == null ? "—" : "近7日 " + Fmt.pct(p.change_pct)}</span></div>
-  <div class="metric-spark" data-spark="${Fmt.esc(JSON.stringify(p.sparkline || []))}"></div>
-  <div class="metric-time">价格日期：${Fmt.esc(p.price_date || "—")}</div>
-</div>`).join("") || '<div class="empty-state">暂无产品数据</div>';
+  <div class="metric-change"><span class="${Fmt.cls(p.change_pct)}">${p.change_pct == null ? "—" : "较上次 " + (p.prev_date ? "(" + String(p.prev_date).slice(5) + ") " : "") + Fmt.pct(p.change_pct)}</span></div>
+  <div class="metric-spark" data-spark="${Fmt.esc(JSON.stringify(sparkVals))}"></div>
+  <div class="metric-time">数据日期：${Fmt.esc(p.price_date || "—")}</div>
+</div>`;
+  }).join("") || '<div class="empty-state">暂无产品数据</div>';
   me.querySelectorAll(".metric-spark").forEach((d) => {
     try { renderSparkline(d, JSON.parse(d.dataset.spark)); } catch (e) { /* ignore */ }
   });
@@ -91,7 +94,8 @@ async function renderTopic(key) {
 
   // 涨跌榜（仅回收链）
   if (t.emphasis && t.rankings) {
-    renderRankTable(el.querySelector("#tp-rank"), t.rankings.top_gainers, t.rankings.top_losers);
+    renderRankTable(el.querySelector("#tp-rank"), t.rankings.top_gainers,
+                    t.rankings.top_losers, { based_on: t.rankings.based_on });
   }
 
   // 主趋势图：拉取每个产品的趋势序列（最多 6 条）

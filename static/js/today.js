@@ -46,14 +46,14 @@ function renderMetrics(d) {
 <div class="metric-card">
   <div class="metric-head"><span class="metric-name">${Fmt.esc(m.name)}</span><span class="metric-sub">${Fmt.esc(m.category || "")}</span></div>
   <div class="metric-value">${Fmt.price(m.value)}<span class="metric-unit">${Fmt.esc(m.unit || "")}</span></div>
-  <div class="metric-change"><span class="${Fmt.cls(m.change_pct)}">${m.change_pct == null ? "—" : "较昨日 " + Fmt.pct(m.change_pct)}</span></div>
-  <div class="metric-time">价格日期：${Fmt.esc(m.price_date || "—")}</div>
+  <div class="metric-change"><span class="${Fmt.cls(m.change_pct)}">${m.change_pct == null ? "—" : "较上次 " + (m.prev_date ? "(" + String(m.prev_date).slice(5) + ") " : "") + Fmt.pct(m.change_pct)}</span></div>
+  <div class="metric-time">数据日期：${Fmt.esc(m.price_date || "—")}${m.is_stale ? '<span class="label-warn">数据较旧</span>' : ""} · 更新时间：${Fmt.esc(m.updated_at || "—")}</div>
 </div>`).join("") || '<div class="empty-state">暂无指标数据</div>';
 }
 
 function renderRanks(d) {
   const r = d.rankings || {};
-  renderRankTable(document.getElementById("rank-wrap"), r.top_gainers, r.top_losers);
+  renderRankTable(document.getElementById("rank-wrap"), r.top_gainers, r.top_losers, { based_on: r.based_on });
 }
 
 function renderGroupChips(d) {

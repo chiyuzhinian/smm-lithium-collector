@@ -24,7 +24,7 @@ MODE="${1:-install}"
 
 FILESERVER_SERVICE="smm-fileserver"
 FILESERVER_UNIT="[Unit]
-Description=SMM 锂电价格与回收业务数据中心门户 (端口8888)
+Description=锂电价格与回收业务数据中心门户 (端口8888)
 After=network.target
 
 [Service]
