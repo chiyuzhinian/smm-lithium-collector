@@ -25,6 +25,13 @@ fi
 # 确保日志目录存在
 mkdir -p logs
 
+# 互斥锁：防止 9:05 定时任务与兜底补采(@reboot/9:30)/手动运行并发
+exec 9>"${ROOT}/logs/.collect.lock"
+if ! flock -n 9; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') 已有采集任务在运行，跳过本次"
+    exit 0
+fi
+
 # 执行采集（透传所有参数）
 echo "$(date '+%Y-%m-%d %H:%M:%S') 开始采集..."
 .venv/bin/python scripts/run_daily.py "$@"

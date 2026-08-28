@@ -23,8 +23,12 @@ MODE="${1:-install}"
 # ── 定时任务内容 ──────────────────────────────────────────────
 # 次日采集模式：每天 9:05 采集前一天（页面有数据的最近交易日）数据，
 # 当天不采集当日数据（周五数据周一早上入库）。采集内含页面数据日期校准、
-# 验证、固定汇总门控、MySQL 同步，无需当天的兜底/补采任务。
+# 验证、固定汇总门控、MySQL 同步。
+# 兜底补采：9:30 重试（9:05 失败但未宕机）+ @reboot 开机补采（宕机错过 9:05）。
+# catchup_daily.sh 会先查 collection_runs 判断今天是否已采集成功，未成功才执行。
 CRON_DAILY="5 9 * * 1-5 /bin/bash ${ROOT}/scripts/run_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
+CRON_RETRY="30 9 * * 1-5 /bin/bash ${ROOT}/scripts/catchup_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
+CRON_REBOOT="@reboot sleep 60 && /bin/bash ${ROOT}/scripts/catchup_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
 MARKER="# SMM 锂电采集定时任务（由 install_cron.sh 管理）"
 
 # ── 生成新的 crontab ──────────────────────────────────────────
@@ -33,13 +37,15 @@ gen_crontab() {
     echo ""
     echo "$MARKER"
     echo "$CRON_DAILY"
+    echo "$CRON_RETRY"
+    echo "$CRON_REBOOT"
 }
 
 # ── 移除 SMM 任务 ────────────────────────────────────────────
 remove_smm_tasks() {
     local tmp
     tmp=$(mktemp)
-    crontab -l 2>/dev/null | grep -v "$MARKER" | grep -v "run_daily.sh" | grep -v "retry_metals.py" > "$tmp" || true
+    crontab -l 2>/dev/null | grep -v "$MARKER" | grep -v "run_daily.sh" | grep -v "catchup_daily.sh" | grep -v "retry_metals.py" > "$tmp" || true
     if [ -s "$tmp" ]; then
         # 删除末尾多余空行
         sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp" 2>/dev/null || true

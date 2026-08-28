@@ -276,7 +276,9 @@ python scripts/backfill.py --start-date 2026-07-01 --end-date 2026-07-22
 pytest -q
 
 # 安装每日定时任务（Linux 服务器）
-bash scripts/install_cron.sh        # 工作日 9:05 采集前一天数据（次日采集模式，无当天兜底任务）
+bash scripts/install_cron.sh        # 工作日 9:05 采集前一天数据（次日采集模式）
+#   兜底补采：9:30 重试 + @reboot 开机补采（catchup_daily.sh 查 DB 判断当日未成功才执行，
+#   run_daily.sh 内有 flock 互斥锁防并发）
 
 # 数据门户（服务器 8888 端口，smmweb 非特权用户运行）
 #   首页 / 今日价格 /today / 历史数据 /history / 业务专题 /topics（回收链重点）
