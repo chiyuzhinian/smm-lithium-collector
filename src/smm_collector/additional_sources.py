@@ -63,9 +63,13 @@ def _extract_from_historical(html: str, canonical: str, prod_cfg: dict,
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "lxml")
 
-    latest_date = None
-    latest_cells = None
+    best_date = None
+    best_cells = None
+    best_price = -1.0
     for table in soup.find_all("table"):
+        # 页面存在两张"历史价格表"：价格表和升贴水表（表头同为日期/最低价/最高价/均价/涨跌，
+        # 无法靠表头区分）。价格表的均价列是价格（数万元），升贴水表的均价列是升贴水
+        # （数百元），故在日期行候选中取均价最大者，自然选中价格行。
         for tr in table.select("tbody tr"):
             tds = tr.select("td")
             if len(tds) < 5:
@@ -73,19 +77,19 @@ def _extract_from_historical(html: str, canonical: str, prod_cfg: dict,
             cells = [td.get_text(strip=True) for td in tds]
             if not re.match(r'\d{4}-\d{2}-\d{2}', cells[0]):
                 continue
-            # 跳过升贴水等非价格表（价格应 > 500 元/吨，升贴水通常 < 500）
             try:
-                if len(cells) >= 4 and float(cells[3]) < 500:
-                    continue
+                avg = float(cells[3])
             except ValueError:
-                pass
-            d = cells[0]
-            if latest_date is None or d > latest_date:
-                latest_date = d
-                latest_cells = cells
+                continue
+            if avg > best_price:
+                best_price = avg
+                best_date = cells[0]
+                best_cells = cells
 
-    if not latest_date or not latest_cells:
+    if not best_date or not best_cells:
         return []
+    latest_date = best_date
+    latest_cells = best_cells
 
     # 检查最新日期是否在陈旧阈值内
     stale_days = src_cfg.get("stale_after_days", 5)

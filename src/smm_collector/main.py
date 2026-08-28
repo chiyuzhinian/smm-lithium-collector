@@ -185,7 +185,9 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 			try:
 				from .synchronizer import sync as sync_to_mysql
 				from .data_quality import generate_daily_report
-				sync_stats = sync_to_mysql(cfg.path("database_path"), date_from=target_date, date_to=target_date)
+				# 用校准后的数据日期同步，而非目标日期：页面未发布当日数据时
+				# price_date==data_date（通常 D-1），按 target_date 同步会命中空窗口
+				sync_stats = sync_to_mysql(cfg.path("database_path"), date_from=data_date, date_to=data_date)
 				meta["mysql_sync"] = sync_stats
 				generate_daily_report(meta, sync_stats, cfg.path("export_dir"))
 			except Exception: log.exception("MySQL同步异常")
