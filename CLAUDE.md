@@ -1,197 +1,170 @@
-# CLAUDE.md — SMM Lithium Spot Price Collector
+# CLAUDE.md — SMM 锂电现货价格采集系统（含数据门户）
+
+> 本文档基于 **2026-09-06 生产服务器实际运行状态**全面更新。
+> 维护约定：重大变更（新功能/新表/新定时任务/部署变更）后同步更新本文件与 `DEPLOYMENT_STATUS_*.md`。
 
 ## 1. 项目简介
 
 - **项目名称**：SMM 锂电现货价格每日采集器 (smm-lithium-collector)
 - **版本**：1.0.0
-- **项目目标**：自动化从 SMM（上海有色网）每日采集锂电现货页面全部可见分类的现货价格数据（约 40 个分类，覆盖锂电全产业链），存入 SQLite 数据库并导出 Excel/CSV 报表。
-- **业务背景**：锂电产业链价格跟踪需要每日采集 SMM 公开报价数据，手工采集耗时易错，需要合规的自动化工具有效获取数据。页面分类会随业务更新而增减，因此采用动态发现而非固定列表。
+- **项目目标**：自动化从 SMM（上海有色网）每日采集锂电现货页面全部可见分类的现货价格数据（约 40 个分类，覆盖锂电全产业链：上游矿 → 中游材料 → 下游电芯 → 回收），存入 SQLite，同步 MySQL，导出 Excel/CSV 报表，并通过数据门户（8888）对外展示。
+- **业务背景**：锂电产业链价格跟踪需要每日采集 SMM 公开报价数据。页面分类随业务更新增减，采用动态发现而非固定列表。
 - **核心使用场景**：
-  - 每日自动采集（服务器 cron 工作日 9:05，次日采集模式：采前一天数据）
-  - 手动指定日期/分类采集
-  - 页面结构变化时运行诊断脚本（自动发现全部分类）
-  - 登录状态过期后重新手动登录
-  - 测试新配置/结构时使用 dry-run 模式
+  - 每日自动采集（服务器 cron 工作日 9:05 + 9:30/开机兜底补采）
+  - 手动指定日期/分类采集；历史回溯补采（hq.smm.cn API）
+  - 数据门户：今日价格 / 历史数据 / 业务专题 / 数据质量 / 管理员运维中心
+  - 登录状态过期后重新手动登录；页面结构变化时运行诊断脚本
 
-## 2. 技术栈
+## 2. 生产环境现状（2026-09-06 核实）
+
+| 项 | 状态 |
+|----|------|
+| 服务器 | Ubuntu 云服务器，公网 IP **106.12.59.96**，项目路径 `/root/smm-lithium-collector` |
+| venv | `.venv`（Python 3.12）；依赖装于 venv 内 |
+| systemd | `smm-fileserver.service` — **active/running**，端口 8888，非特权用户 smmweb，沙箱加固（ProtectSystem=strict 等），StateDirectory=`/var/lib/smm-fileserver` |
+| cron（root） | 由 `scripts/install_cron.sh` 管理：`5 9 * * 1-5` run_daily.sh、`30 9 * * 1-5` catchup_daily.sh、`@reboot` catchup_daily.sh |
+| nginx (:80) | `ip-access`（default_server，公网 IP 临时入口）+ `price.ldhs.online` → 127.0.0.1:8888 |
+| SQLite | `data/database/smm_lithium.db`：**12661 条**（2025-11 至 2026-09-03，另 1 行 price_date 为空） |
+| MySQL | 本地 3306，库 `smm_lithium`：`smm_price_records` 12656 条（max 2026-09-03）、`smm_sync_runs` 19 批次全 success、`smm_data_quality_issues` 22373 条 |
+| collection_runs | 46 次；最近 2026-09-04 **success**（39 分类 440 行；当日页面缺 PACK） |
+| 每日验证 | 08-31 ~ 09-04 连续 **WARNING**（无 FAIL；WARNING 为周更品种滞后等非致命项） |
+| 门户账号 | huayou（普通）/ admin（管理员），库 `/var/lib/smm-fileserver/auth.db`（PBKDF2-SHA256，0600，Web 不可达） |
+| 钉钉 | 已配置（每日采集完成后推送日报 + Excel 下载链接） |
+| Git 分支 | ⚠️ 服务器部署于 **feature/auth-admin-dashboard**（领先 origin/main **7 个提交**），生产 = 此分支，勿在 main 上操作 |
+| 测试 | **226 passed**（pytest 22.6s） |
+
+### 文档现状（哪些可信）
+
+- ✅ `DEPLOYMENT_STATUS_2026-08-19.md` — 最新生产部署状态（nginx 入口/公网 IP/ICP 状态）
+- ✅ `DEPLOY.md` / `SERVER_SETUP.md` — 服务器部署手册；`QUERIES.md` — SQL 查询参考
+- ✅ `config/categories_portal.yaml` — 门户+固定汇总门控+重点产品+专题的统一配置（关键文件）
+- ❌ `README.md` / `RUN_GUIDE.md` — **已过时**（Windows/ngrok 时代），勿据此操作
+
+## 3. 技术栈
 
 | 类别 | 技术 | 版本 |
 |------|------|------|
-| 编程语言 | Python | ≥3.11 |
+| 编程语言 | Python | ≥3.11（生产 venv 为 3.12） |
 | 浏览器自动化 | Playwright (Chromium) | ≥1.45, <2 |
 | HTML 解析 | BeautifulSoup4 + lxml | bs4≥4.12, lxml≥5.2 |
 | 数据处理 | pandas, openpyxl | pandas≥2.2, openpyxl≥3.1 |
-| 数据存储 | SQLite | 标准库 |
+| 数据存储 | SQLite + MySQL (pymysql) | 标准库 / pymysql |
 | 配置 | PyYAML + python-dotenv | PyYAML≥6.0, dotenv≥1.0 |
 | HTTP | httpx | ≥0.27 |
+| Web 服务 | http.server（标准库，scripts/file_server.py） | 零框架 |
 | 测试 | pytest + pytest-asyncio | pytest≥8.2 |
 | 日志 | logging (标准库) | - |
 
-## 3. 目录结构
+## 4. 目录结构
 
 ```
-C:\科研\smm_lithium_collector/
-├── .env                          # 环境变量（含敏感信息，gitignore）
-├── .env.example                  # 环境变量模板（可提交）
-├── .gitignore                    # Git 忽略规则
-├── pyproject.toml                # 项目元数据和依赖声明（setuptools）
-├── requirements.txt              # pip 依赖列表（含测试依赖）
-├── README.md                     # 项目使用文档（中文）
-├── CLAUDE.md                     # 本文件 — AI/开发者项目上下文
+/root/smm-lithium-collector/
+├── .env / .env.example          # 环境变量（SMM 登录、MySQL、钉钉；.env 不入库）
+├── pyproject.toml / requirements.txt
+├── CLAUDE.md                    # 本文件
+├── DEPLOY.md / SERVER_SETUP.md / QUERIES.md / DEPLOYMENT_STATUS_2026-08-19.md
+├── README.md / RUN_GUIDE.md     # ⚠️ 过时（Windows 时代），勿参考
 │
 ├── config/
-│   ├── settings.yaml             # 分类模式（auto/manual）+ 输出路径 + 浏览器/采集参数
-│   └── selectors.yaml            # 页面 CSS 选择器 — 必须在 inspect_page.py 后人工确认填写
+│   ├── settings.yaml            # 采集参数 + 附加数据源（铝/铜/镍）+ 9 层验证阈值
+│   ├── selectors.yaml           # SMM 页面选择器（section 模式，分类名选择器已确认）
+│   ├── categories_portal.yaml   # 门户与门控统一配置：40 规范分类/A-F分组/12指标卡/
+│   │                            #   20重点产品(db三元组)/4专题/账号阈值/健康阈值/日志白名单
+│   └── business_report_mapping.yaml  # 规范日报(11列)材料映射（华友循环/华友绿能）
 │
-├── src/smm_collector/            # 核心 Python 包
-│   ├── __init__.py               # __version__ = "1.0.0"
-│   ├── main.py                   # 主入口：collect() 完整采集流程 + cli() 命令行解析
-│   ├── config.py                 # AppConfig 数据类 + load_config() 合并 YAML 和 .env
-│   ├── logger.py                 # setup_logging() 双文件日志（全量+仅错误）+ 控制台
-│   ├── browser.py                # open_browser() / close_browser() Playwright 生命周期
-│   ├── authentication.py         # save_manual_login() / looks_logged_out() / guarded_auto_login()
-│   ├── category_navigator.py     # CategoryNavigator 分类切换 + exhaust_page() 滚动加载
-│   ├── parser.py                 # parse_html_tables() 通用表格解析 + parse_category_section() 按区块解析
-│   ├── network_capture.py        # NetworkCapture 拦截 XHR/Fetch JSON 响应
-│   ├── cleaner.py                # normalize_str/unit + parse_decimal() + parse_price_date()
-│   ├── validator.py              # validate_row() + check_price_volatility() + run_status()
-│   ├── database.py               # Database 类：SQLite schema、upsert、save_run + 多日查询
-│   ├── exporter.py               # export_daily() Excel/CSV 导出 + 近N日展示 + 历史/固定汇总
-│   ├── mysql_database.py         # MySQL 连接/建表/批量upsert/异常记录/同步记录
-│   ├── synchronizer.py           # SQLite→MySQL 同步编排 + 数据分类 + 重试 + 质量跟踪
-│   ├── data_quality.py           # generate_daily_report() 数据质量报告 JSON
-│   └── logger.py                 # setup_logging() 双文件日志（全量+仅错误）+ 控制台
+├── src/smm_collector/           # 核心包
+│   ├── main.py                  # collect() 全流程编排 + cli()
+│   ├── config.py                # AppConfig + load_config + load_portal_config
+│   ├── browser.py / authentication.py
+│   ├── category_navigator.py    # 分类发现/切换 + exhaust_page 滚动
+│   ├── parser.py / network_capture.py / cleaner.py
+│   ├── validator.py             # validate_row + run_status + modal_price_date(页面日期校准)
+│   ├── database.py              # SQLite：lithium_spot_prices + collection_runs
+│   ├── exporter.py              # 每日 Excel/CSV + 固定汇总门控 + update_summaries
+│   ├── additional_sources.py    # 附加数据源（SMM铝/铜/镍现货，升贴水表已排除）
+│   ├── business_report.py       # 规范日报生成（映射配置 → 11 列报表）
+│   ├── daily_validation.py      # 每日 9 层数据验证（只读，写 logs/validation/）
+│   ├── data_quality.py          # 质量报告 JSON + 每日数据状态 manifest
+│   ├── mysql_database.py / synchronizer.py  # MySQL 建表/批量 upsert/重试/同步编排
+│   ├── notifier.py              # 钉钉日报推送
+│   ├── web_auth.py              # 门户账号/Session/CSRF/防爆破（标准库 PBKDF2）
+│   ├── ops_monitor.py           # 管理员运维中心聚合（/proc + 既有产物，零新数据）
+│   ├── ops_events.py            # 运维事件写入 auth.db（采集器与 Web 共用）
+│   └── logger.py                # 双文件日志（全量 + 仅错误）+ 控制台
 │
-├── scripts/                      # 独立脚本
-│   ├── run_daily.py              # 每日采集入口（导入 main.cli）
-│   ├── run_daily.bat             # Windows 批处理包装（激活 venv）
-│   ├── manual_login.py           # 手动登录脚本 — 有界面浏览器
-│   ├── inspect_page.py           # 页面诊断脚本 — 自动发现全部分类
-│   ├── generate_report.py        # 领导汇报报告生成器
-│   ├── sync_to_mysql.py          # MySQL 同步脚本（支持 --date/--full/--dry-run）
-│   ├── backfill.py               # 历史补采脚本（当前为桩实现）
-│   ├── sanitize_diagnostics.py   # 清理已保存网络诊断文件的敏感 URL 参数
-│   ├── install_daily_task.ps1    # 安装 Windows 计划任务
-│   ├── query_daily_task.ps1      # 查询计划任务状态
-│   └── remove_daily_task.ps1     # 删除计划任务
+├── scripts/
+│   ├── run_daily.py             # 每日采集入口（调 main.cli）
+│   ├── run_daily.sh             # cron 包装：venv 检查 + flock 互斥锁
+│   ├── catchup_daily.sh         # 兜底补采（9:30 + @reboot）：查 collection_runs，今日未 success 才采集
+│   ├── install_cron.sh          # 安装/移除 cron（--dry-run / --remove）
+│   ├── deploy_server.sh         # Ubuntu 一键部署（venv/playwright/依赖）
+│   ├── setup_systemd.sh / secure_fileserver.sh  # systemd 安装 / smmweb 最小只读权限
+│   ├── file_server.py           # 数据门户 Web 服务（8888，静态页 + ~20 个 API）
+│   ├── init_auth.py             # 门户账号库初始化/重置（huayou/admin，首登强制改密）
+│   ├── manual_login.py / manual_login_auto.py / manual_login_metals.py  # 手动登录
+│   ├── inspect_page.py          # 页面诊断（分类发现/HTML/截图/网络捕获）
+│   ├── backfill_history.py      # 历史回溯：hq.smm.cn API 拉最近 30 交易日（已实现）
+│   ├── backfill_remaining.py    # 缺失分类一次性补采
+│   ├── backfill.py              # 桩实现（勿用）
+│   ├── retry_metals.py          # 铜铝镍 11:00 延迟补采（⚠️ 当前 crontab 未安装）
+│   ├── rebuild_summaries.py     # 从 SQLite 全量重建历史/固定汇总（--dry-run/--fix-gaps）
+│   ├── build_market_report.py   # 市场价格报表（匹配模板格式 + 涨跌基准）
+│   ├── generate_report.py       # 领导汇报报告（产业链全景 Excel）
+│   ├── run_validation.py / verify_data_consistency.py / verify_key_products.py  # 验证/对账
+│   ├── sync_to_mysql.py         # MySQL 同步 CLI（--date/--full/--dry-run）
+│   ├── probe_api.py / probe_hq.py / probe_hq2.py / extract_mapping.py  # hq.smm.cn 探测工具
+│   └── *.bat / *.ps1 / *.vbs    # Windows 时代遗留（服务器上不用）
 │
-├── tests/                        # pytest 测试
-│   ├── fixtures/                 # HTML fixture 文件
-│   │   ├── lithium_metal.html    # 锂金属：1行数据
-│   │   ├── lithium_ore.html      # 锂矿：2行数据
-│   │   └── lithium_compound.html # 锂化合物：2行数据
-│   ├── test_parser.py            # 通用 HTML 表格解析
-│   ├── test_section_parser.py    # 分类区块解析
-│   ├── test_cleaner.py           # parse_decimal / parse_price_date
-│   ├── test_cleaner_normalize.py # 字符串标准化
-│   ├── test_validator.py         # 校验规则 + run_status
-│   ├── test_validator_enhanced.py # 波动检测 + 价格范围
-│   ├── test_database.py          # 去重/更新/分类唯一键
-│   ├── test_database_queries.py  # 多日查询
-│   ├── test_exporter.py          # 多 Sheet 导出
-│   ├── test_price_statistics.py  # 产品分组 + 均价计算
-│   ├── test_synchronizer.py      # 同步逻辑
-│   └── test_category_navigator.py # 分类遍历 + 失败继续
-│
-├── data/
-│   ├── auth/                     # Playwright storage_state.json（gitignore）
-│   ├── database/                 # SQLite 数据库文件（gitignore）
-│   ├── raw/                      # 原始采集数据 + 网络捕获 + 诊断报告（gitignore）
-│   ├── processed/                # 处理后中间数据（gitignore，目前未使用）
-│   ├── exports/                  # 导出 Excel/CSV/历史汇总（gitignore）
-│   └── screenshots/              # 截图（gitignore）
-│
-└── logs/                         # 日志文件（gitignore）
+├── static/                      # 门户前端：index/today/history/topics/quality/admin/
+│   │                            #   login/register/account/403.html + js/ + css/
+├── tests/                       # 226 个测试（fixtures 不依赖真实网络）
+├── data/                        # gitignore
+│   ├── auth/                    # storage_state.json（合并了锂电+基础金属登录态）
+│   ├── database/                # smm_lithium.db
+│   ├── raw/                     # 按 年/月/日/分类 存 HTML/JSON/PNG + run_metadata_*.json
+│   ├── exports/                 # 2026/MM/DD/分类CSV + 每日汇总(Excel/质量报告/manifest)
+│   │   ├── 固定汇总/             # 正式固定汇总 + 临时快照 + inspect.ndjson
+│   │   ├── summary/             # 领导汇报/供应链报告
+│   │   └── SMM锂电现货价格_历史汇总.xlsx
+│   ├── backups/ / processed/ / screenshots/
+│   └── external/                # external_prices.xlsx（非 SMM 来源外部数据，自动进报表）
+└── logs/
+    ├── collector_YYYY-MM-DD.log / error_YYYY-MM-DD.log
+    ├── cron.log / cron_metals.log / task_scheduler_exit.log
+    └── validation/              # 每日 9 层验证结果（不在 Web 根）
 ```
 
-## 4. 核心业务流程
+## 5. 核心业务流程（采集）
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│ 1. 加载配置                                                     │
-│    settings.yaml  +  selectors.yaml  +  .env                    │
-└─────────────────────┬──────────────────────────────────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────────────┐
-│ 2. 启动 Chromium 浏览器                                         │
-│    注入 data/auth/storage_state.json 恢复登录态                  │
-└─────────────────────┬──────────────────────────────────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────────────┐
-│ 3. 导航到 SMM 锂电现货页面 (SMM_TARGET_URL)                     │
-│    检测登录状态 → 失效时保存现场截图+HTML 并报错                  │
-└─────────────────────┬──────────────────────────────────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────────────┐
-│ 4. 自动发现全部分类 + 按 DOM 顺序遍历采集                           │
-│    ├── discover_categories(page, heading_selector) 动态发现         │
-│    ├── 约 40 个分类覆盖锂电全产业链（上游矿→中游材料→下游电芯→回收）│
-│    ├── CategoryNavigator.locate(name) 定位分类入口                  │
-│    ├── exhaust_page() 展开"更多" + 稳定滚动                         │
-│    ├── parse_html_tables() / parse_category_section() 解析表格      │
-│    ├── 字段映射：中文表头 → 标准英文字段                             │
-│    ├── parse_decimal() 数字清洗 + parse_price_date() 日期推导       │
-│    ├── validate_row() 数据校验（价格逻辑+完整性）                    │
-│    ├── 页面数据日期校准 modal_price_date()（当日未发布→按页面众数日期）│
-│    └── 分类失败不影响后续分类（continue_on_category_failure）        │
-└─────────────────────┬──────────────────────────────────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────────────┐
-│ 5. 网络数据捕获                                                  │
-│    拦截 XHR/Fetch JSON 响应（含价格关键词），去敏 URL 后保存      │
-└─────────────────────┬──────────────────────────────────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────────────┐
-│ 6. 存储和导出                                                   │
-│    ├── Database.upsert() → SQLite（去重/更新）                   │
-│    ├── SQLite 查询最近 3 个价格日期                                 │
-│    ├── 每日 Excel/CSV 导出（动态分类Sheet + 中文列名）             │
-│    ├── export_daily() → Excel + CSV（动态分类Sheet + 中文列名）    │
-│    ├── 历史汇总更新（仅 status==success，保持原字段）               │
-│    └── 固定汇总更新（仅全部发现分类完整成功时）                     │
-└─────────────────────┬──────────────────────────────────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────────────┐
-│ 7. MySQL 同步 + 质量报告                                         │
-│    ├── synchronizer.sync() → MySQL 批量 upsert（record_hash）     │
-│    ├── 写入数据质量问题表 smm_data_quality_issues                  │
-│    ├── 记录同步批次 smm_sync_runs                                 │
-│    ├── 支持失败重试（3次，指数退避）                               │
-│    └── generate_daily_report() → JSON 质量报告                   │
-└─────────────────────┬──────────────────────────────────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────────────┐
-│ 8. 写入元数据 + 退出                                            │
-│    run_metadata_{stamp}.json + 退出码(0/2/1)                    │
-└────────────────────────────────────────────────────────────────┘
+1. 加载配置            settings.yaml + selectors.yaml + categories_portal.yaml + .env
+2. 启动 Chromium        注入 data/auth/storage_state.json 恢复登录态
+3. 导航目标页           登录失效 → 截图+HTML 存 data/screenshots/ 并报错
+4. 动态发现分类          section 模式：按 .FilterTable_categoryName__izrKr 发现 ~39-40 分类
+   逐分类：exhaust_page 滚动 → parse_category_section → validate_row → 保存 HTML/JSON/截图
+   分类失败不影响后续（continue_on_category_failure）
+5. 页面数据日期校准      modal_price_date()：SMM 未发布当日数据时按页面数据日期（通常前一交易日）
+                       对齐（max_stale_data_days=14）；校验/门控/验证/同步全用校准后 data_date
+                       ⚠️ 仅当 cron 不传 --date 时校准；手动 --date 尊重显式日期不校准
+6. 入库 SQLite          upsert（业务唯一键去重）；dry-run 跳过
+7. 附加数据源           铝/铜/镍现货（.ant-table），升贴水表已排除；失败不影响主流程
+8. 导出 + 固定汇总门控   export_daily（每日 Excel/CSV）；固定汇总门控：规范分类全集完整 +
+                       日期对齐率≥0.6 + invalid≤0.05，不达标只写临时快照不覆盖正式文件
+9. 每日 manifest        SMM数据状态_{日期}.json 无条件生成（缺失分类/对齐率/门控决策）
+10. 每日 9 层验证        daily_validation.py（只读）：文件/结构/日期/重复/分类/数值/波动/
+                        历史连续/固定汇总一致性 → PASS/WARNING/FAIL 写 logs/validation/
+11. MySQL 同步          按校准后 data_date 同步（不是 target_date，避免空窗）；3 次重试
+12. 钉钉通知            日报摘要 + Excel 下载链接；运维事件写 auth.db
+13. 退出码              0 success / 2 partial_success / 1 failed
 ```
 
-## 5. 数据结构
+## 6. 数据结构
 
-### 采集数据行 (parser 输出)
+### 采集数据行（parser 输出）
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `source` | str | "SMM" |
-| `market` | str | "SMM锂电现货" |
-| `category` | str | "锂金属" / "锂矿" / "锂化合物" |
-| `product_name` | str | 品名（如"金属锂""锂辉石""碳酸锂"） |
-| `specification` | str | 规格（如"Li≥99%"） |
-| `min_price` | Decimal\|None | 最低价 |
-| `max_price` | Decimal\|None | 最高价 |
-| `average_price` | Decimal\|None | 平均价 |
-| `change_value` | Decimal\|None | 涨跌 |
-| `unit` | str | 单位（如"元/吨"） |
-| `price_date` | date\|None | 价格日期（MM-DD 自动推导年份） |
-| `price_date_raw` | str | 原始日期文本 |
-| `collected_at` | datetime | 采集时间 |
-| `source_url` | str | 来源URL |
-| `collection_method` | str | "DOM" |
-| `raw_text` | str | 原始行文本 |
-| `extra_fields` | str | JSON — 未映射的额外字段（如"产地"） |
-| `record_hash` | str | SHA256 业务内容哈希 |
-| `validation_status` | str | "valid" / "warning" / "invalid" |
-| `validation_message` | str | 校验信息 |
+19 字段：`source / market / category / product_name / specification / min_price / max_price /
+average_price / change_value / unit / price_date / price_date_raw / collected_at / source_url /
+collection_method / raw_text / extra_fields / record_hash(SHA256) / validation_status / validation_message`
 
 ### 数据库唯一键
 
@@ -199,245 +172,170 @@ C:\科研\smm_lithium_collector/
 (source, market, category, product_name, specification, unit, price_date)
 ```
 
-### 数据库表
+### SQLite 表
 
-**SQLite**（本地）：
-- **lithium_spot_prices** — 价格数据主表（1634 条，覆盖 2025-11 至 2026-07）
-- **collection_runs** — 每次采集的运行元数据
+- **lithium_spot_prices** — 价格主表（12661 条）
+- **collection_runs** — 采集运行元数据（schema 已变更）：
+  `run_id TEXT PK, started_at, finished_at, target_date, status, expected_categories,
+  success_categories, failed_categories, total_raw_rows, total_clean_rows, error_message`
+  （JSON 数组存分类列表；查询用 target_date，不是 run_date）
 
-**MySQL**（同步备份）：
-- **smm_price_records** — 价格主表（UNIQUE KEY = record_hash，DECIMAL 金额字段）
-- **smm_data_quality_issues** — 数据质量异常记录（warning/error，可追溯）
-- **smm_sync_runs** — 同步批次记录（running/success/partial_success/failed）
+### MySQL 表（库 smm_lithium）
 
-### Excel 导出字段
+- **smm_price_records** — 价格主表（UNIQUE KEY=record_hash，DECIMAL 金额）
+- **smm_data_quality_issues** — 质量异常记录（warning/error）
+- **smm_sync_runs** — 同步批次（sync_batch_id、sync_status、date_from/date_to 按校准后日期）
 
-19 列标准字段（source/market/category/product_name/specification/min_price/max_price/average_price/change_value/unit/price_date/collected_at/source_url/collection_method/raw_text/extra_fields/record_hash/validation_status/validation_message）。
+### 门户账号库（/var/lib/smm-fileserver/auth.db）
 
-> 注：原「近三日对比」产品线已于 2026-08 废弃（不再生成 `近三日对比_*.xlsx`，`price_statistics.py` 已删除）。
+`users`（PBKDF2-SHA256 哈希、role、must_change_password、disabled、soft_deleted）、
+`sessions`（token 只存 SHA-256）、`login_audit`、`lockout`、`ops_events`（采集器与 Web 共用）。
 
-### 导出 Excel Sheet（动态）
+## 7. 运行方式（Linux 服务器）
 
-- `全部数据` / 40 个分类各一个 Sheet / `采集说明`
+```bash
+cd /root/smm-lithium-collector
 
-## 6. 运行方式
+# 每日采集（cron 已装：工作日 9:05 + 9:30/@reboot 兜底；flock 防并发）
+bash scripts/install_cron.sh            # 安装/更新定时任务（--dry-run 预览，--remove 移除）
+bash scripts/run_daily.sh               # 手动采集（透传 --date/--category/--headed/--dry-run）
+bash scripts/catchup_daily.sh --check   # 查看今日是否需兜底补采
 
-### 环境要求
+# 手动采集变体
+.venv/bin/python scripts/run_daily.py --date 2026-07-22 --dry-run
+.venv/bin/python scripts/run_daily.py --category 锂金属 --headed
 
-- Windows 系统
-- Python 3.11+
-- Chromium（Playwright 自动下载）
+# 历史补采（hq.smm.cn API，最近 30 交易日）
+.venv/bin/python scripts/backfill_history.py --dry-run
 
-### 初始化
+# 门户（systemd 管理）
+systemctl restart smm-fileserver     # 门户改代码后重启
+journalctl -u smm-fileserver -n 100  # 看门户日志
 
-```bat
-cd /d C:\科研\smm_lithium_collector
-py -m venv .venv
-.venv\Scripts\activate
-py -m pip install --upgrade pip
-py -m pip install -r requirements.txt
-py -m playwright install chromium
-copy .env.example .env
-```
+# 账号管理
+.venv/bin/python scripts/init_auth.py        # 建库/交互建号
+.venv/bin/python scripts/init_auth.py --reset  # 重置密码为 123456 并强制首登改密
 
-### 编辑 .env
-
-必须填写：
-- `SMM_LOGIN_URL` = 登录页面 URL
-- `SMM_TARGET_URL` = 目标数据页面 URL
-
-`SMM_USERNAME` 和 `SMM_PASSWORD` 仅在确认无验证码且配置了可靠表单选择器后才用于自动登录；当前安全默认是手动登录。
-
-### 运行命令
-
-```bat
-# 首次：手动登录
-python scripts/manual_login.py
-
-# 页面诊断（结构变化时使用）
-python scripts/inspect_page.py
-
-# 每日采集
-python scripts/run_daily.py
-
-# 指定日期
-python scripts/run_daily.py --date 2026-07-22
-
-# 指定分类
-python scripts/run_daily.py --category 锂金属 --headed
-
-# 试运行（不写数据库）
-python scripts/run_daily.py --dry-run
-
-# 历史补采（需先确认页面支持）
-python scripts/backfill.py --start-date 2026-07-01 --end-date 2026-07-22
-
-# 运行测试
-pytest -q
-
-# 安装每日定时任务（Linux 服务器）
-bash scripts/install_cron.sh        # 工作日 9:05 采集前一天数据（次日采集模式）
-#   兜底补采：9:30 重试 + @reboot 开机补采（catchup_daily.sh 查 DB 判断当日未成功才执行，
-#   run_daily.sh 内有 flock 互斥锁防并发）
-
-# 数据门户（服务器 8888 端口，smmweb 非特权用户运行）
-#   首页 / 今日价格 /today / 历史数据 /history / 业务专题 /topics（回收链重点）
-#   数据质量 /quality 与运维中心 /admin（含 /admin/users 用户管理）仅管理员可见（服务端 role 校验）
-#   表单登录 + 服务端 Session；账号库 /var/lib/smm-fileserver/auth.db（PBKDF2-SHA256，0600，Web 不可达）
-#   公开页：/login 登录、/register 注册（服务端强制 role=user，忽略前端 role 参数）
-#   管理员用户管理 API：GET|POST /api/admin/users（停用/启用/重置密码为 123456/软删除）
-#   账号初始化/重置：python scripts/init_auth.py（--reset 重置密码并强制首登改密）
-# 重启: systemctl restart smm-fileserver
-
-# 从 SQLite 重建历史汇总 + 固定汇总（发现汇总异常时）
+# 汇总重建与校验
 .venv/bin/python scripts/rebuild_summaries.py --dry-run
 .venv/bin/python scripts/rebuild_summaries.py --fix-gaps
+.venv/bin/python scripts/verify_data_consistency.py   # 门户数据对账（只读）
+.venv/bin/python scripts/verify_key_products.py       # 重点产品 DB↔API 对账
+
+# MySQL 同步 CLI
+.venv/bin/python scripts/sync_to_mysql.py --date 2026-09-03 --dry-run
+.venv/bin/python scripts/sync_to_mysql.py --full
+
+# 测试
+.venv/bin/python -m pytest -q        # 226 passed
 ```
 
-### 退出码
+### 数据门户（8888）
 
-| 退出码 | 含义 |
-|--------|------|
-| 0 | success — 所有预期分类采集成功 |
-| 2 | partial_success — 部分分类成功 |
-| 1 | failed — 所有分类失败 |
+- 页面：`/`(首页:指标卡+重点产品20卡) `/today` `/history` `/topics`(回收链重点) `/quality`
+  `/admin`(运维中心，仅 admin) `/login` `/register` `/account` `/403`
+- API：`/api/latest` `/api/overview` `/api/categories` `/api/files` `/api/history` `/api/trends`
+  `/api/stats` `/api/topics` `/api/quality` `/api/key-products[/history]`
+  `/api/auth/*`(login/logout/me/csrf/register/change-password)
+  `/api/admin/*`(overview/users/logs/tasks/events/errors/data-quality/audit)
+  `/health`
+- 服务端强制 role=user 注册；管理员用户管理：停用/启用/重置密码/软删除
 
-## 7. 开发规范
+## 8. 开发规范
 
-### 文件命名
-- Python 模块：`snake_case.py`
-- 测试文件：`test_*.py`
-- 配置文件：`*.yaml`
-- 脚本：`verb_noun.py`
+### 文件/函数命名
+- Python 模块：`snake_case.py`；测试：`test_*.py`；配置文件：`*.yaml`；脚本：`verb_noun.py`
+- 公开函数 `snake_case()`、异步 `async def`、私有 `_underscore`、常量 `UPPER_CASE`
 
-### 函数命名
-- 公开函数：`snake_case()`
-- 异步函数：`async def snake_case()`
-- 私有/内部：`_underscore_prefix()`
-- 常量/别名：`UPPER_CASE`
-
-### 模块职责
-- `main.py` — 只做流程编排，不包含具体的解析/存储/导出逻辑
-- `parser.py` — 只做 HTML→dict 转换，不访问数据库和文件系统
-- `exporter.py` — 只做 DataFrame→Excel/CSV，不采集数据
-- `config.py` — 唯一读取配置文件的地方
+### 模块职责（保持单向依赖）
+- `main.py` 只做流程编排；`parser.py` 只做 HTML→dict（不碰 DB/文件系统）；`exporter.py` 只做
+  DataFrame→Excel/CSV；`config.py` 是唯一读配置入口
+- **portal 统一配置**：门户文案/分组/指标/重点产品/门控阈值/健康阈值全部在
+  `config/categories_portal.yaml`，前端与采集侧共用，改门户先改配置
 
 ### 异常处理
-- 采集失败不应中断其他分类采集
-- 网络/解析错误应记录日志并标记分类为 failed
-- 数据库 locked 错误自动重试（指数退避）
-- 不要吞掉异常不记录
+- 采集失败不中断其他分类；网络/解析错误记日志并标记 failed
+- DB locked 自动重试（指数退避）；不吞异常不记录
 
-### 日志记录
-- 使用 `logging.getLogger("smm_collector")`
-- INFO：流程节点（分类开始、导出路径、最终状态）
-- WARNING：非致命异常（日期不匹配、平均价范围）
-- ERROR：致命错误（登录失效、解析为空）
-- 不要在日志中输出密码、完整 Cookie、Token、Authorization
+### 日志
+- `logging.getLogger("smm_collector")`；INFO 流程节点 / WARNING 非致命 / ERROR 致命
+- 绝不输出密码、Cookie、Token、Authorization
 
-### 类型注解
-- 使用 `from __future__ import annotations`
-- 公开函数应标注参数和返回值类型
-- 使用 `Decimal | None` 而非 `Optional[Decimal]`
+### 测试
+- 本地 HTML fixture，不依赖真实网络；DB 测试用 tmp_path；异步用 pytest-asyncio
+- 测试文件（21 个）：parser/section_parser/cleaner/validator(2)/database(2)/exporter/
+  synchronizer/category_navigator/business_report/consistency_rules/daily_validation/
+  data_date/ops_monitor/web_auth/auth_gate 等
 
-### 注释规范
-- 中文注释可用于业务逻辑说明
-- 英文注释用于技术细节
-- 每个公开模块应有模块级 docstring
-- 复杂算法应注释原因（Why），而非复述代码（What）
+## 9. 安全约束
 
-### 测试要求
-- 使用本地 HTML fixture，不依赖真实网络
-- 每个模块至少覆盖正常路径 + 一个边缘场景
-- 数据库测试使用 `tmp_path`
-- 异步测试使用 `pytest-asyncio`
-- 不将 fixture 数据写死为真实网站结构
+1. 不绕过验证（验证码/滑块/短信）；不隐藏自动化特征；不绕过付费墙
+2. 不保存凭证：密码/Token 不入日志、不入 DB（密码只存 PBKDF2 哈希）
+3. storage_state.json 仅本机使用，不传输不共享
+4. 诊断优先：未确认 DOM 结构前不凭猜测填选择器
+5. 门户：账号库 0600 且 StateDirectory 在 Web 根之外；CSRF + 防爆破 + 会话 token 哈希入库
+6. 路径穿越防护（file_server 白名单）；systemd 沙箱：NoNewPrivileges/ProtectSystem=strict/PrivateTmp
+7. 管理日志查看白名单：`{date}` 由服务器时钟推导，绝不接受客户端路径
 
-### 敏感信息管理
-- **绝不**在代码中硬编码账号、密码、Token、Cookie、API Key
-- `.env` 必须加入 `.gitignore`
-- 数据目录（`data/`）整体 gitignore
-- 日志输出前应过滤敏感字段
-- URL 保存前应去除 query string（`network_capture.safe_url()`）
-- `data/auth/` 目录 `storage_state.json` 不提交
-
-## 8. 安全约束
-
-1. **不绕过验证**：不破解验证码、滑块验证、短信验证
-2. **不隐藏自动化**：不伪造 User-Agent、不隐藏 webdriver 特征
-3. **不过度采集**：不绕过付费墙、登录限制、分页/导出上限
-4. **不保存凭证**：不将密码/Token/Authorization Header 保存到日志或数据库
-5. **不共享会话**：storage_state.json 仅本机使用，不传输不共享
-6. **合规采集**：使用用户自己合法的 SMM 账号，采集账号正常可见的数据
-7. **诊断优先**：在未确认页面实际 DOM 结构前，不凭猜测填入 CSS 选择器
-
-## 9. 当前完成情况
+## 10. 当前完成情况
 
 ### 已完成
 
 | 功能 | 说明 |
 |------|------|
-| ✅ 分类自动发现 | 从页面 DOM 动态提取全部 40 个分类 |
-| ✅ 完整采集流程 | 自动发现 → 逐分类解析 → 清洗 → 校验 → 存储 → 导出 |
-| ✅ 手动登录 + 会话保持 | storage_state.json |
-| ✅ 页面诊断 | HTML/截图/元素统计/网络捕获/分类发现 |
-| ✅ HTML 表格解析 | 通用 + 按分类区块，中文表头映射 |
-| ✅ 数据清洗 | Decimal 转换、千分位、日期推导（跨年）、字符串标准化、Unicode 规范化 |
-| ✅ 数据校验 | 价格逻辑、日间波动检测、必填字段、日期异常、负数检测 |
-| ✅ SQLite 存储 | 业务唯一键去重，价格变化更新，locked 重试 |
-| ✅ Excel 导出 | 动态分类 Sheet、中文列名 |
-| ❌ 近三日对比（已废弃） | 2026-08 下线：文件/代码/配置/文档已删除 |
-| ✅ CSV 导出 | 每日总 CSV + 每分类单独 CSV |
-| ✅ 历史汇总 + 固定汇总 | 自动累积去重，三分类全部成功时更新 |
-| ✅ MySQL 同步 | 自动建库建表、批量 upsert (record_hash)、3 表结构 |
-| ✅ 数据质量报告 | JSON 格式，包含采集+同步统计 |
-| ✅ 领导汇报报告 | 产业链全景 Excel（按上游/中游/下游/回收组织） |
-| ✅ 日志系统 | 双文件（全量 + 仅错误）+ 控制台 |
-| ✅ CLI 参数 | --date、--category、--headed、--dry-run |
-| ✅ MySQL 同步 CLI | --date、--start-date/--end-date、--full、--dry-run、--quality-report |
-| ✅ Windows 定时任务 | 每日 10:00 自动采集 |
-| ✅ 测试 | **74 个测试**全部通过 |
-| ✅ 重试机制 | SQLite locked 重试 + MySQL 同步 3 次重试 |
-| ✅ 配置化 | settings.yaml 控制分类模式、同步、近N日窗口等 |
-| ✅ 数据门户 | 8888 门户：今日必看/指标卡/四专题/历史中心/质量面板 + 7 个 API |
-| ✅ 固定汇总门控 | 规范全集比对 + 日期对齐率 + invalid 阈值；不达标写临时快照不覆盖正式文件 |
-| ✅ 每日 manifest | SMM数据状态_{日期}.json（无条件生成，含缺失分类/对齐率/固定汇总决策） |
-| ✅ 汇总重建脚本 | rebuild_summaries.py 从 SQLite 全量重建 + 缺口日回补 |
-| ✅ 安全加固 | 路径穿越修复 + 非特权 smmweb 运行 + systemd 沙箱 |
+| ✅ 采集全流程 | 动态发现 39-40 分类 → 解析 → 清洗 → 校验 → SQLite → 导出 |
+| ✅ 页面数据日期校准 | 当日未发布按页面日期对齐（14 天上限），周末/节假日无 FAIL |
+| ✅ 附加数据源 | SMM 铝/铜/镍现货（升贴水表排除）；历史补采 API（30 交易日） |
+| ✅ 每日 9 层数据验证 | 只读，PASS/WARNING/FAIL，写 logs/validation/ |
+| ✅ 固定汇总门控 | 规范全集+对齐率 0.6+invalid 0.05；不达标写临时快照 |
+| ✅ 每日 manifest | 无条件生成，含缺失分类/对齐率/门控决策 |
+| ✅ MySQL 同步 | 3 表 + record_hash 去重 + 3 次重试 + 按校准日期同步 |
+| ✅ 钉钉日报 | 摘要 + Excel 下载链接 |
+| ✅ 数据门户 | 8888：首页(重点产品 20 卡/7d+30d 真实趋势)/今日/历史/专题/质量/运维中心 |
+| ✅ 门户账号体系 | 表单登录+Session+CSRF+防爆破+注册(强制 user)+管理员用户管理 |
+| ✅ 运维中心 | 系统资源/采集任务/验证结果/事件/错误日志查看 |
+| ✅ 业务报告 | 规范日报（11 列，映射配置）+ 领导汇报 + 市场价格报表 |
+| ✅ 兜底补采 | 9:30 重试 + @reboot 开机补采 + flock 互斥锁 |
+| ✅ 汇总重建 | rebuild_summaries.py 从 SQLite 全量重建 + 缺口回补 |
+| ✅ 一键部署 | deploy_server.sh + setup_systemd.sh + secure_fileserver.sh |
+| ✅ 测试 | 226 个全部通过 |
 
-### 数据现状
+### 数据现状（2026-09-06）
 
-- SQLite：**1634 条记录**，覆盖 **2025-11 至 2026-07**，40 个分类
-- MySQL：三张表自动同步
-- 每日 Excel：按分类 Sheet 展示当日全量数据（近三日对比已废弃）
+- SQLite：12661 条，2025-11 至 2026-09-03；MySQL 同步一致（12656 条）
+- 每日约 440 行（39-40 分类）；页面数据日期 = 最近交易日（9:05 采集多为前一交易日）
+- 固定汇总：历史汇总 174KB；正式固定汇总含门控快照机制
+- 市场价格模板 39 项：SMM 28 项已全采；缺 15 项来自非 SMM 来源（Benchmark NCM 黑粉 3 项、
+  江苏华友客户反馈 4 项、华宝三元正极 8 项）→ 放入 `data/external/external_prices.xlsx` 自动进报表
 
-### 未完成
+## 11. 未完成 / 已知问题
 
-| 功能 | 状态 |
-|------|------|
-| ❌ 历史日期补采 | backfill.py 仅桩实现 |
-| ❌ 自动登录 | 需先确认表单选择器 |
-| ❌ 分页翻页 | selectors.yaml 分页配置为空 |
-| ⚠️ API 优先采集 | prefer_api: true 未实现 |
-| ⚠️ 邮件/消息通知 | 未实现 |
+| 项 | 状态 |
+|----|------|
+| ⚠️ `prefer_api: true` | 未实现（采集仍是 DOM 解析；API 仅用于 backfill_history） |
+| ⚠️ 自动登录 | 未实现（需先确认表单选择器；当前手动登录） |
+| ⚠️ 分页翻页 | selectors.yaml 分页配置为空 |
+| ⚠️ retry_metals.py | 脚本存在但当前 crontab 未安装；铜/镍晚发布由页面日期校准兜底 |
+| ⚠️ PACK 分类 | 页面时有时无（2026-09-04 缺失 → 固定汇总 temp_snapshot，正常机制） |
+| ⚠️ 文档 | README.md / RUN_GUIDE.md 过时（Windows/ngrok 时代） |
+| ⚠️ pandas FutureWarning | 空 DataFrame concat 行为将变化（exporter.py:185） |
+| ⚠️ 1 行 price_date 为空 | 历史脏数据（12661 行中 1 行） |
+| ❌ 邮件通知 | 未实现（钉钉已替代） |
 
-### 材料覆盖缺口（待补充外部数据）
+## 12. 维护注意（踩坑清单）
 
-市场价格模板 39 项材料中，SMM 来源 28 项**已全部采集**（部分通过名称映射匹配）。
-以下 **15 项缺失来自非 SMM 来源**，需手动提供：
-
-| 来源 | 缺失项 | 数量 |
-|------|--------|------|
-| **Benchmark** | NCM黑粉（日韩/北美/欧洲） | 3 |
-| **江苏华友客户反馈** | 工商业储能系统(液冷)、小动力电池6020/6030/6050 | 4 |
-| **华宝** | 5系/6系/8系/9系/NCA三元正极材料 | 8 |
-
-> 外部数据放入 `data/external/external_prices.xlsx` 即可自动填充到报表中。
-> 华宝三元材料需确认数据来源后再配置。
-
-### 已知问题
-
-- pandas `FutureWarning`：空的 DataFrame concat 行为将变化
-- `.pytest_cache` 写入权限问题（不影响测试）
-- 次日采集模式：每天 9:05 采集前一天（页面有数据的最近交易日）数据，当天不采集当日数据；页面数据日期校准保证未发布/节假日时按页面日期对齐不产生 FAIL（周五数据周一早上入库，周末门户显示周四数据）
-- 门控阈值（对齐率 0.6 / invalid 0.05）为初值，观察一周 manifest 后可校准（config/categories_portal.yaml）
+1. **页面日期滚动风险**：SMM 部分品种 9:30~10:30 翻日，越早补采越完整；补采触发前
+   catchup_daily.sh 先查 collection_runs 当日是否 success
+2. **日期口径**：MySQL 同步/验证/门控一律用校准后 `data_date`，不是 `target_date`
+3. **升贴水表**：金属页面附加表已排除（0779491）；新增附加源时注意过滤非价格表
+4. **产品规格改名**：SMM 曾把「压实密度」改为「粉体压实密度」——categories_portal.yaml 的
+   key_products `db` 是列表，改名时追加三元组即可合并不产生断档
+5. **重点产品身份**：(category, product_name, specification) 精确匹配，绝不用模糊名称匹配；
+   同产品双分类收录靠 `db[].category` 钉死
+6. **固定汇总门控**：PACK 缺失等分类不全时会写临时快照而非正式文件——这是机制不是 bug
+7. **验证只读**：9 层验证与门控只记录不删数据；原始数据永不删除
+8. **auth.db 权限**：Web 服务以 smmweb 运行，采集器（root cron）写 ops_events 到同一 auth.db，
+   ops_events 异常安全（失败不影响采集）
+9. **门户重启**：改 file_server.py / static / config 后 `systemctl restart smm-fileserver`
+10. **登录态**：锂电页 + 基础金属页合并于 storage_state.json（manual_login_metals.py）；失效时
+    采集会保存 login_expired 截图并报错
