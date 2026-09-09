@@ -205,14 +205,14 @@ products:
     template_detail: "磷酸铁锂正极（储能型压实密度≥2.5g/cm3，80%循环保持率可实现循环次数8000-11000次左右）",
       chemistry: LFP, display_name: "磷酸铁锂正极", spec: "储能型压实密度≥2.5g/cm3，80%循环保持率可实现循环次数8000-11000次左右", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: unavailable_merged, mapping_basis: "SMM公告2026-07-17调整5：'储能型≥2.50'已并入'压实密度≥2.50'价格点，无独立报价",
-      note: "暂无独立报价：SMM 2026-07-17 起将储能型≥2.50 并入压实密度≥2.50 价格点（征询函调整5）。不复制同价冒充独立采集；月报该行留空。如需参考可查看'动力型≥2.50'对应的同系列报价",
+      note: "暂无数据：SMM 2026-07-17 起将储能型≥2.50 并入压实密度≥2.50 价格点（征询函调整5）。不复制同价冒充独立采集；月报该行留空。如需参考可查看'动力型≥2.50'对应的同系列报价",
       series: [],
       keywords: [磷酸铁锂正极, 磷酸铁锂, LFP, 储能型, 压实密度, 2.50, 2.5] }
   - { id: "lfp_ess_240", template_row: 27, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "磷酸铁锂正极（储能型压实密度≥2.4g/cm3，80%循环保持率可实现循环次数7000-11000次左右）",
       chemistry: LFP, display_name: "磷酸铁锂正极", spec: "储能型压实密度≥2.4g/cm3，80%循环保持率可实现循环次数7000-11000次左右", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: unavailable_merged, mapping_basis: "SMM公告2026-07-17调整6：'储能型≥2.40'已并入'压实密度≥2.40'价格点，无独立报价",
-      note: "暂无独立报价：SMM 2026-07-17 起将储能型≥2.40 并入压实密度≥2.40 价格点（征询函调整6）。不复制同价冒充独立采集；月报该行留空",
+      note: "暂无数据：SMM 2026-07-17 起将储能型≥2.40 并入压实密度≥2.40 价格点（征询函调整6）。不复制同价冒充独立采集；月报该行留空",
       series: [],
       keywords: [磷酸铁锂正极, 磷酸铁锂, LFP, 储能型, 压实密度, 2.40, 2.4] }
   - { id: "lfp_ess_230", template_row: 28, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,

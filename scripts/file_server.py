@@ -2,7 +2,7 @@
 
 基于 Python 标准库 http.server，无额外依赖（PyYAML 用于门户配置解析）。
 功能：
-  GET / /today /history /topics → 门户页面（static/*.html，需登录）
+  GET / /today /topics → 门户页面（static/*.html，需登录）
   GET /quality                  → 数据质量页（仅管理员）
   GET /login /register /account /admin [/admin/users]
                                 → 登录 / 注册 / 账号 / 运维中心页面
@@ -83,7 +83,6 @@ PAGE_MAP = {
     "/trends": "trends.html",
     "/reports": "reports.html",
     "/today": "today.html",
-    "/history": "history.html",
     "/topics": "topics.html",
     "/quality": "quality.html",
     "/login": "login.html",

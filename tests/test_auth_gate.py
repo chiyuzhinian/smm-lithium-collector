@@ -149,7 +149,6 @@ class TestUnauthenticated:
     def test_pages_redirect_to_login(self, env):
         r = request(env.port, "GET", "/")
         assert r["status"] == 302 and r["headers"]["location"] == "/login?next=/"
-        assert request(env.port, "GET", "/history")["status"] == 302
         assert request(env.port, "GET", "/today")["status"] == 302
         assert request(env.port, "GET", "/admin")["status"] == 302
 

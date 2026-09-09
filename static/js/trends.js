@@ -1,14 +1,21 @@
 /* 价格走势：单产品区间带+指标曲线 / 多产品对比（趋势分析页，无底部明细表）
    V5：点选多产品不限数量；跨单位自动双 Y 轴（>2 种单位提示不可比）；
-   调色板 10 色槽位稳定；图例带单位；区间内无点标「暂无历史价格」；
-   无选择显示引导；图表高度随系列数自适应；浅色主题常量。 */
+   图例带单位；区间内无点标「暂无历史价格」；无选择显示引导；
+   图表高度随系列数自适应；浅色主题常量。
+   V6：产品下拉全量（无 10 条上限）；调色板 10 色外黄金角扩展（>10 不撞色）；图例滚动。 */
 "use strict";
 
-/* 多序列分类色：10 色槽位（浅色表面友好，色相区分大），槽位随产品稳定不循环 */
+/* 多序列分类色：前 10 槽位固定（浅色表面友好，色相区分大），槽位随产品稳定不循环；
+   第 11+ 用黄金角 HSL 顺序生成（colorAt），保证 10+ 产品不撞色 */
 const SERIES_COLORS = [
   "#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed",
   "#0891b2", "#db2777", "#65a30d", "#ea580c", "#0d9488",
 ];
+function colorAt(i) {
+  if (i < SERIES_COLORS.length) return SERIES_COLORS[i];
+  const h = Math.round((i - SERIES_COLORS.length) * 137.508 + 210) % 360;
+  return `hsl(${h} 65% 45%)`;
+}
 const BRAND_BLUE = "#2563eb";
 const BAND_FILL = "rgba(37, 99, 235, 0.10)";
 const BAND_EDGE = "rgba(37, 99, 235, 0.30)";
@@ -80,6 +87,10 @@ function bindControls() {
   document.getElementById("product-pick").addEventListener("focus", function () {
     renderSuggest(this.value.trim());
   });
+  // 点选产品后输入框保持焦点，focus 不再触发——click 时重渲染，保证再次点开显示全量列表
+  document.getElementById("product-pick").addEventListener("click", function () {
+    renderSuggest(this.value.trim());
+  });
   document.addEventListener("click", (e) => {
     const s = document.getElementById("product-suggest");
     if (s && !e.target.closest(".search-wrap")) s.classList.remove("open");
@@ -141,9 +152,8 @@ function currentWindow() {
 function renderSuggest(q) {
   const box = document.getElementById("product-suggest");
   const norm = q.toLowerCase();
-  let hits = tstate.products.filter((p) =>
+  const hits = tstate.products.filter((p) =>
     !norm || (p.searchable || "").toLowerCase().includes(norm));
-  hits = hits.slice(0, 10);
   if (!hits.length) {
     box.innerHTML = `<div class="suggest-empty">没有匹配的产品</div>`;
   } else {
@@ -184,7 +194,7 @@ function removeProduct(id) {
   renderChips();
 }
 
-/* 配色槽位：会话内稳定（颜色跟随产品，不随选择顺序/移除重排） */
+/* 配色槽位：会话内稳定（颜色跟随产品，不随选择顺序/移除重排）；超过 10 个顺序分配扩展槽 */
 function colorSlot(id) {
   if (tstate.colorMap.has(id)) return tstate.colorMap.get(id);
   for (let i = 0; i < SERIES_COLORS.length; i++) {
@@ -193,11 +203,14 @@ function colorSlot(id) {
       return i;
     }
   }
-  return tstate.selected.length % SERIES_COLORS.length;
+  const used = [...tstate.colorMap.values()];
+  const next = used.length ? Math.max(...used) + 1 : SERIES_COLORS.length;
+  tstate.colorMap.set(id, next);
+  return next;
 }
 
 function chipColor(id) {
-  return tstate.selected.length === 1 ? BRAND_BLUE : SERIES_COLORS[colorSlot(id)];
+  return tstate.selected.length === 1 ? BRAND_BLUE : colorAt(colorSlot(id));
 }
 
 /* 图表头：指标/单位/时间范围 + 已选产品图例（含区间带标注） */
@@ -469,7 +482,7 @@ function multiOption() {
       <div class="tip-note" style="color:var(--ink-3)">${note}</div></div>`;
   };
   base.series = tstate.series.map((s) => {
-    const color = SERIES_COLORS[colorSlot(s.id)];
+    const color = colorAt(colorSlot(s.id));
     const data = dates.map((d) => {
       const p = s.points.find((x) => x.price_date === d);
       if (!p) return null;   // 该品种当日缺报 → 断点，不补 0、不插值

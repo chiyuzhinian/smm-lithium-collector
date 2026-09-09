@@ -257,7 +257,7 @@ def _remark_for(rng: dict) -> str | None:
     """主表 K 列备注：只写必要口径说明，干净行留空。"""
     parts = []
     if rng["mapping_status"] == "unavailable_merged":
-        parts.append(rng["note"] or "暂无独立报价")
+        parts.append(rng["note"] or "暂无数据")
     if rng["mapping_status"] == "confirmed_renamed":
         parts.append("SMM 2026-07-17 新口径（不含循环寿命承诺）")
     if rng["mom_reason"]:

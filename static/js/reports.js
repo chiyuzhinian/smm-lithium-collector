@@ -1,10 +1,10 @@
-/* 数据与报表：①全部分类数据（全量入口，分类多选） ②月度业务报表（预览 + 下载）
-   V5：分类筛选改多选 chips（后端 categories 参数）；月报月份下限由数据库历史起点驱动。 */
+/* 数据与报表：①价格对比（首页产品多选 × 日期范围 → /api/portal/history） ②月度业务报表（预览 + 下载）
+   V6：删除历史归档与固定汇总入口；分类检索改为产品价格对比；月报月份下限由数据库历史起点驱动。 */
 "use strict";
 
 const rstate = {
   tab: "dataset",
-  ds: { cats: [], catList: [], prod: "", from: "", to: "", q: "", page: 1, pageSize: 100, total: 0 },
+  ds: { products: [], picked: [], from: "", to: "", series: [], dbLatest: null, historyFrom: null },
   monthly: null,
   historyFrom: null,
 };
@@ -13,7 +13,7 @@ const COMP_TAG = {
   complete: '<span class="tag daily">完整</span>',
   incomplete: '<span class="tag merged">不完整</span>',
   in_progress: '<span class="tag weekly">月份未结束</span>',
-  unavailable: '<span class="tag merged">暂无独立报价</span>',
+  unavailable: '<span class="tag merged">暂无数据</span>',
   manual: '<span class="tag org">人工填写</span>',
 };
 
@@ -23,16 +23,38 @@ async function init() {
   bindTabs();
   bindDataset();
   bindMonthly();
-  // 历史起点（月报月份下限与计算说明共用，来自数据库而非前端硬编码）
+  // 产品列表 + 历史起点/最新日期（同一接口，与首页/走势共用，不另维护列表）
   try {
     const data = await API.get("/api/portal/products", 60000);
-    if (data.meta && data.meta.history_from) {
-      rstate.historyFrom = data.meta.history_from;
+    rstate.ds.products = data.products.filter((p) => p.source === "SMM");
+    rstate.ds.dbLatest = data.meta.db_latest_date;
+    rstate.ds.historyFrom = data.meta.history_from;
+    rstate.historyFrom = data.meta.history_from;
+    if (data.meta.history_from) {
       document.getElementById("month-input").min = data.meta.history_from.slice(0, 7);
     }
-  } catch (err) { /* 忽略：月份下限回落到默认 */ }
-  await loadCategories();
-  await searchDataset();
+    setupDateDefaults();
+  } catch (err) {
+    notify("产品列表加载失败：" + err.message, "error");
+  }
+  await searchDataset();   // 无选择 = 全部 40 个业务品种，页面加载即有对比表
+}
+
+function setupDateDefaults() {
+  const to = rstate.ds.dbLatest;
+  if (!to) return;
+  const fromInput = document.getElementById("ds-from");
+  const toInput = document.getElementById("ds-to");
+  if (rstate.ds.historyFrom) fromInput.min = rstate.ds.historyFrom;
+  if (rstate.ds.dbLatest) { fromInput.max = rstate.ds.dbLatest; toInput.max = rstate.ds.dbLatest; }
+  const d = new Date(to + "T00:00:00");
+  d.setDate(d.getDate() - 29);
+  let from = d.toISOString().slice(0, 10);
+  if (from < (rstate.ds.historyFrom || from)) from = rstate.ds.historyFrom || from;
+  rstate.ds.from = from;
+  rstate.ds.to = to;
+  fromInput.value = from;
+  toInput.value = to;
 }
 
 function bindTabs() {
@@ -47,71 +69,53 @@ function bindTabs() {
   });
 }
 
-/* ══════════ ① 全部分类数据 ══════════ */
+/* ══════════ ① 价格对比 ══════════ */
 
 function bindDataset() {
-  document.getElementById("ds-cat-pick").addEventListener("click", () => {
-    const box = document.getElementById("ds-cat-suggest");
+  document.getElementById("ds-prod-pick").addEventListener("click", () => {
+    const box = document.getElementById("ds-prod-suggest");
     if (box.classList.contains("open")) box.classList.remove("open");
-    else renderCatSuggest(true);
+    else renderProdSuggest(true);
   });
   document.addEventListener("click", (e) => {
-    const s = document.getElementById("ds-cat-suggest");
-    if (s && !e.target.closest("#ds-cat-pick") && !e.target.closest("#ds-cat-suggest")) {
+    const s = document.getElementById("ds-prod-suggest");
+    if (s && !e.target.closest("#ds-prod-pick") && !e.target.closest("#ds-prod-suggest")) {
       s.classList.remove("open");
     }
   });
   document.getElementById("ds-search").addEventListener("click", async () => {
-    rstate.ds.q = document.getElementById("ds-q").value.trim();
     rstate.ds.from = document.getElementById("ds-from").value;
     rstate.ds.to = document.getElementById("ds-to").value;
-    rstate.ds.prod = document.getElementById("ds-prod").value;
-    rstate.ds.page = 1;
     await searchDataset();
   });
-  document.getElementById("ds-reset").addEventListener("click", () => {
-    rstate.ds = { ...rstate.ds, cats: [], prod: "", from: "", to: "", q: "", page: 1 };
-    document.getElementById("ds-prod").value = "";
-    document.getElementById("ds-from").value = "";
-    document.getElementById("ds-to").value = "";
-    document.getElementById("ds-q").value = "";
-    renderCatChips();
-    loadProducts().then(searchDataset);
+  document.getElementById("ds-reset").addEventListener("click", async () => {
+    rstate.ds.picked = [];
+    renderProdChips();
+    setupDateDefaults();
+    await searchDataset();
   });
-  document.getElementById("ds-prev").addEventListener("click", () => { rstate.ds.page--; searchDataset(); });
-  document.getElementById("ds-next").addEventListener("click", () => { rstate.ds.page++; searchDataset(); });
 }
 
-async function loadCategories() {
-  try {
-    const data = await API.get("/api/portal/dataset/categories", 60000);
-    rstate.ds.catList = data.categories || [];
-  } catch (err) {
-    notify("分类加载失败：" + err.message, "error");
-  }
-}
-
-function renderCatSuggest(open) {
-  const box = document.getElementById("ds-cat-suggest");
+function renderProdSuggest(open) {
+  const box = document.getElementById("ds-prod-suggest");
   if (!open) { box.classList.remove("open"); return; }
-  const hits = rstate.ds.catList;
+  const hits = rstate.ds.products;
   if (!hits.length) {
-    box.innerHTML = `<div class="suggest-empty">分类加载中…</div>`;
+    box.innerHTML = `<div class="suggest-empty">产品列表加载中…</div>`;
   } else {
-    box.innerHTML = hits.map((c) => {
-      const picked = rstate.ds.cats.includes(c.category);
-      return `<button type="button" class="suggest-item" data-cat="${escHtml(c.category)}">
-        <div class="suggest-name">${picked ? "✓ " : ""}${escHtml(c.category)}
-          <span style="float:right;color:var(--ink-3);font-size:11px">${c.row_count.toLocaleString()} 行</span></div>
-        <div class="suggest-spec">${escHtml(c.min_date)} ~ ${escHtml(c.max_date)} · ${c.date_count} 个报价日</div>
+    box.innerHTML = hits.map((p) => {
+      const picked = rstate.ds.picked.includes(p.id);
+      return `<button type="button" class="suggest-item" data-id="${escHtml(p.id)}">
+        <div class="suggest-name">${picked ? "✓ " : ""}${escHtml(p.display_name)}
+          ${p.spec ? `<span style="font-weight:400;color:var(--ink-3)"> · ${escHtml(p.spec.slice(0, 32))}${p.spec.length > 32 ? "…" : ""}</span>` : ""}
+          <span style="float:right;color:var(--ink-3);font-size:11px">${escHtml(p.unit)}</span></div>
+        <div class="suggest-spec">SMM ${escHtml((p.series[0] || {}).product_name || "")} · ${escHtml(p.info_category)}${p.frequency === "weekly" ? " · 周报价" : ""}</div>
       </button>`;
     }).join("");
     box.querySelectorAll(".suggest-item").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        toggleCat(btn.dataset.cat);
+        togglePicked(btn.dataset.id);
         box.classList.remove("open");
-        await loadProducts();
-        rstate.ds.page = 1;
         await searchDataset();
       });
     });
@@ -119,110 +123,110 @@ function renderCatSuggest(open) {
   box.classList.add("open");
 }
 
-function toggleCat(cat) {
-  const i = rstate.ds.cats.indexOf(cat);
-  if (i >= 0) rstate.ds.cats.splice(i, 1);
-  else rstate.ds.cats.push(cat);
-  renderCatChips();
+function togglePicked(id) {
+  const i = rstate.ds.picked.indexOf(id);
+  if (i >= 0) rstate.ds.picked.splice(i, 1);
+  else rstate.ds.picked.push(id);
+  renderProdChips();
 }
 
-function renderCatChips() {
-  const row = document.getElementById("ds-cat-chips");
-  row.innerHTML = rstate.ds.cats.map((cat) => `
-    <span class="legend-chip">
-      <span class="chip-name" title="${escHtml(cat)}">${escHtml(cat)}</span>
-      <button class="legend-remove" data-cat="${escHtml(cat)}" aria-label="移除 ${escHtml(cat)}">×</button>
-    </span>`).join("");
+function renderProdChips() {
+  const row = document.getElementById("ds-prod-chips");
+  row.innerHTML = rstate.ds.picked.map((id) => {
+    const p = rstate.ds.products.find((x) => x.id === id);
+    if (!p) return "";
+    const name = p.spec ? `${p.display_name}（${p.spec}）` : p.display_name;
+    return `<span class="legend-chip">
+      <span class="chip-name" title="${escHtml(name)}">${escHtml(name)}</span>
+      <button class="legend-remove" data-id="${escHtml(id)}" aria-label="移除 ${escHtml(name)}">×</button>
+    </span>`;
+  }).join("");
   row.querySelectorAll(".legend-remove").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      toggleCat(btn.dataset.cat);
-      await loadProducts();
-      rstate.ds.page = 1;
+      togglePicked(btn.dataset.id);
       await searchDataset();
     });
   });
 }
 
-async function loadProducts() {
-  const sel = document.getElementById("ds-prod");
-  sel.innerHTML = '<option value="">全部产品</option>';
-  if (!rstate.ds.cats.length) return;
-  try {
-    const params = new URLSearchParams();
-    params.set("categories", rstate.ds.cats.join(","));
-    const data = await API.get("/api/portal/dataset/products?" + params.toString(), 30000);
-    for (const p of data.products || []) {
-      const op = document.createElement("option");
-      op.value = p.product_name;
-      op.textContent = p.specification
-        ? `${p.product_name} / ${p.specification}（${p.unit}）` : `${p.product_name}（${p.unit}）`;
-      sel.appendChild(op);
-    }
-  } catch (err) { /* 忽略 */ }
-}
-
 async function searchDataset() {
   const scroll = document.getElementById("ds-scroll");
-  scroll.innerHTML = loadingHtml("正在加载全部分类数据…");
-  const d = rstate.ds;
+  scroll.innerHTML = loadingHtml("正在加载价格对比…");
+  const ids = rstate.ds.picked.length
+    ? rstate.ds.picked
+    : rstate.ds.products.map((p) => p.id);
+  if (!ids.length) {
+    scroll.innerHTML = emptyHtml("📭", "产品列表不可用");
+    return;
+  }
   const params = new URLSearchParams();
-  if (d.cats.length) params.set("categories", d.cats.join(","));
-  if (d.prod) params.set("product", d.prod);
-  if (d.from) params.set("from", d.from);
-  if (d.to) params.set("to", d.to);
-  if (d.q) params.set("q", d.q);
-  params.set("page", d.page);
-  params.set("page_size", d.pageSize);
+  params.set("ids", ids.join(","));
+  if (rstate.ds.from) params.set("from", rstate.ds.from);
+  if (rstate.ds.to) params.set("to", rstate.ds.to);
   try {
-    const data = await API.get("/api/portal/dataset/quotes?" + params.toString(), 10000);
-    d.total = data.total;
-    renderDataset(data);
-    const pages = Math.max(1, Math.ceil(data.total / d.pageSize));
-    document.getElementById("ds-count").innerHTML = `共 <b>${data.total.toLocaleString()}</b> 行`;
-    document.getElementById("ds-page-info").textContent = `第 ${d.page} / ${pages} 页 · 每页 ${d.pageSize} 行`;
-    document.getElementById("ds-prev").disabled = d.page <= 1;
-    document.getElementById("ds-next").disabled = d.page >= pages;
+    const data = await API.get("/api/portal/history?" + params.toString(), 10000);
+    rstate.ds.series = data.series || [];
+    renderComparison(data);
   } catch (err) {
-    scroll.innerHTML = emptyHtml("⚠️", "全量数据加载失败：" + err.message);
+    scroll.innerHTML = emptyHtml("⚠️", "价格对比加载失败：" + err.message);
   }
 }
 
-function renderDataset(data) {
+/* 价格对比表：真实报价点逐点成行（日期倒序、产品按所选顺序）；无数据产品单独标注 */
+function renderComparison(data) {
   const scroll = document.getElementById("ds-scroll");
-  if (!data.rows.length) {
-    scroll.innerHTML = emptyHtml("📭", "没有符合条件的记录");
+  const series = data.series || [];
+  const rows = [];
+  const emptyIds = [];
+  for (const s of series) {
+    if (!s.points || !s.points.length) {
+      emptyIds.push(s.id);
+      continue;
+    }
+    for (const p of s.points) {
+      rows.push({
+        date: p.price_date, id: s.id,
+        name: s.display_name, spec: s.spec || "",
+        min: p.min_price, max: p.max_price, avg: p.average_price, unit: p.unit,
+      });
+    }
+  }
+  const idOrder = new Map(series.map((s, i) => [s.id, i]));
+  rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : idOrder.get(a.id) - idOrder.get(b.id)));
+
+  let head = "";
+  if (emptyIds.length) {
+    const names = emptyIds.map((id) => {
+      const p = rstate.ds.products.find((x) => x.id === id);
+      return p ? `${p.display_name}（${p.unit}）` : id;
+    }).join("、");
+    head += `<div class="quality-state">「${escHtml(names)}」在所选时间范围内暂无数据</div>`;
+  }
+  if (!rows.length) {
+    scroll.innerHTML = head + emptyHtml("📭", "没有符合条件的记录");
     return;
   }
-  let html = `<table class="data-table">
-    <thead><tr>
-      <th>分类</th><th>产品 / 规格</th>
-      <th class="num-cell">最低价</th><th class="num-cell">最高价</th>
-      <th class="num-cell">日均价</th><th class="num-cell">涨跌</th>
-      <th class="ctr">单位</th><th class="num-cell">报价日期</th><th class="num-cell">采集更新</th>
-    </tr></thead><tbody>`;
-  for (const r of data.rows) {
-    const chg = changeText(r.change_value);
-    const specLine = r.specification
-      ? `<div class="product-spec">${escHtml(r.specification)}</div>` : "";
-    html += `<tr>
-      <td class="ds-cat">${escHtml(r.category)}</td>
-      <td class="product-cell">
-        <div class="product-name-row">
-          <span class="product-name">${escHtml(r.product_name)}</span>
-        </div>
-        ${specLine}
-      </td>
-      <td class="num-cell">${priceText(r.min_price)}</td>
-      <td class="num-cell">${priceText(r.max_price)}</td>
-      <td class="num-cell avg-cell">${priceText(r.average_price)}</td>
-      <td class="num-cell change-cell ${chg.cls}">${escHtml(chg.text)}</td>
+  const body = rows.map((r) => `
+    <tr>
+      <td class="num-cell">${escHtml(r.date)}</td>
+      <td class="product-cell"><span class="product-name">${escHtml(r.name)}</span></td>
+      <td>${escHtml(r.spec) || '<span style="color:var(--ink-4)">—</span>'}</td>
+      <td class="num-cell">${priceText(r.min)}</td>
+      <td class="num-cell">${priceText(r.max)}</td>
+      <td class="num-cell avg-cell">${priceText(r.avg)}</td>
       <td class="ctr">${escHtml(r.unit)}</td>
-      <td class="num-cell">${r.price_date}</td>
-      <td class="num-cell" style="color:var(--ink-3)">${fmtTs(r.collected_at)}</td>
-    </tr>`;
-  }
-  html += "</tbody></table>";
-  scroll.innerHTML = html;
+    </tr>`).join("");
+  scroll.innerHTML = head + `<table class="data-table">
+    <thead><tr>
+      <th class="num-cell">日期</th><th>产品</th><th>规格</th>
+      <th class="num-cell">最低价</th><th class="num-cell">最高价</th>
+      <th class="num-cell">日均价</th><th class="ctr">单位</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+  document.getElementById("ds-count").innerHTML =
+    `共 <b>${rows.length}</b> 个报价点 · ${series.length} 个产品` +
+    (emptyIds.length ? ` · ${emptyIds.length} 个暂无数据` : "");
 }
 
 /* ══════════ ② 月度业务报表 ══════════ */

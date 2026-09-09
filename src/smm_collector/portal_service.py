@@ -528,7 +528,7 @@ def monthly_stats(product: dict, con: sqlite3.Connection, month: str,
     if status == "unavailable_merged":
         return {"monthly_avg": None, "points": [], "n_points": 0, "date_from": None,
                 "date_to": None, "completeness": "unavailable",
-                "reason": product.get("note") or "暂无独立报价"}
+                "reason": product.get("note") or "暂无数据"}
 
     pts = merge_points(product_rows(con, product, date_from=m_from, date_to=m_to))
     vals: list[Decimal] = []

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>数据与报表 · 锂电价格与回收业务数据中心</title>
-<link rel="stylesheet" href="/static/css/app.css?v=5">
+<link rel="stylesheet" href="/static/css/app.css?v=6">
 </head>
 <body data-page="reports">
 <div id="navbar"></div>
@@ -16,7 +16,7 @@
     <div class="page-head-left">
       <h1 class="page-title">数据与报表</h1>
       <div class="page-status">
-        <span>全部分类数据检索</span>
+        <span>产品价格对比</span>
         <span class="status-sep">·</span>
         <span>月度业务报表生成与下载</span>
       </div>
@@ -25,7 +25,7 @@
 
   <!-- 子页标签（两个视图严格互斥：[hidden] 全局生效） -->
   <div class="seg" style="margin-bottom:10px;align-self:flex-start" id="tab-seg">
-    <button class="active" data-tab="dataset">全部分类数据</button>
+    <button class="active" data-tab="dataset">价格对比</button>
     <button data-tab="monthly">月度业务报表</button>
   </div>
 
@@ -33,16 +33,12 @@
   <section id="tab-dataset">
     <div class="filter-bar">
       <div class="field">
-        <label for="ds-cat-pick">分类</label>
+        <label for="ds-prod-pick">产品</label>
         <div class="search-wrap">
-          <button class="ctl pick-input" id="ds-cat-pick" type="button"
-                  aria-haspopup="listbox" title="点击选择分类（可多选，如：锂盐 / 黑粉 / 正极材料 / 回收产品）">选择分类 ▾</button>
-          <div class="search-suggest" id="ds-cat-suggest"></div>
+          <button class="ctl pick-input" id="ds-prod-pick" type="button"
+                  aria-haspopup="listbox" title="点击选择产品（可多选、可跨类别/单位）；不选 = 全部 40 个业务品种">选择产品 ▾</button>
+          <div class="search-suggest" id="ds-prod-suggest"></div>
         </div>
-      </div>
-      <div class="field search-field" style="flex:1 1 220px;max-width:340px">
-        <label for="ds-prod">产品</label>
-        <select class="ctl" id="ds-prod" style="flex:1;min-width:0"><option value="">全部产品</option></select>
       </div>
       <div class="field">
         <label>日期范围</label>
@@ -52,31 +48,18 @@
           <input class="ctl" type="date" id="ds-to">
         </div>
       </div>
-      <div class="field">
-        <label for="ds-q">关键词</label>
-        <input class="ctl" id="ds-q" type="text" placeholder="产品 / 规格 / 分类" style="width:150px">
-      </div>
       <div class="btn-group">
         <button class="btn primary" id="ds-search">查询</button>
         <button class="btn ghost" id="ds-reset">重置</button>
       </div>
-      <div class="chips-row" id="ds-cat-chips"></div>
+      <div class="chips-row" id="ds-prod-chips"></div>
       <div class="result-count" id="ds-count">—</div>
     </div>
 
-    <!-- 表格主体：页面正常纵向滚动，分页紧邻表格底部 -->
+    <!-- 价格对比表：真实报价点（无插值、无补数），无分页 -->
     <div class="panel">
       <div class="table-scroll" id="ds-scroll">
-        <div class="loading"><span class="spinner"></span>正在加载全部分类数据…</div>
-      </div>
-      <div class="pager-bar">
-        <button class="btn sm" id="ds-prev" disabled>← 上一页</button>
-        <span class="pager-info" id="ds-page-info">—</span>
-        <button class="btn sm" id="ds-next" disabled>下一页 →</button>
-        <span class="flex-1"></span>
-        <a class="btn sm" href="/SMM锂电现货价格_历史汇总.xlsx">历史汇总 xlsx</a>
-        <a class="btn sm" href="/固定汇总/SMM锂电现货价格_固定汇总.xlsx">固定汇总 xlsx</a>
-        <a class="btn sm" href="/history">历史归档文件 →</a>
+        <div class="loading"><span class="spinner"></span>正在加载价格对比…</div>
       </div>
     </div>
   </section>
@@ -117,10 +100,10 @@
 <div id="footer"></div>
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/echarts.min.js?v=5"></script>
-<script src="/static/js/api.js?v=5"></script>
-<script src="/static/js/common.js?v=5"></script>
-<script src="/static/js/nav.js?v=5"></script>
-<script src="/static/js/reports.js?v=5"></script>
+<script src="/static/js/echarts.min.js?v=6"></script>
+<script src="/static/js/api.js?v=6"></script>
+<script src="/static/js/common.js?v=6"></script>
+<script src="/static/js/nav.js?v=6"></script>
+<script src="/static/js/reports.js?v=6"></script>
 </body>
 </html>

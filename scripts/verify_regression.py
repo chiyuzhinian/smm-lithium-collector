@@ -124,7 +124,12 @@ CHART_LABELS = """
 
 def wait_ready(page, name):
     if name == "trends":
-        page.wait_for_selector("#chart canvas", timeout=45000)
+        # 预览实例单线程偶发卡顿：canvas 未及时渲染时重载一次（趋势页幂等）
+        try:
+            page.wait_for_selector("#chart canvas", timeout=45000)
+        except Exception:
+            page.reload()
+            page.wait_for_selector("#chart canvas", timeout=60000)
         page.wait_for_timeout(1500)
     elif name == "reports":
         page.wait_for_selector("#tab-dataset .data-table", timeout=30000)
@@ -234,6 +239,46 @@ def verify_trends(page, w, h, tag):
         page.set_viewport_size({"width": w, "height": h})
         page.wait_for_timeout(600)
 
+    # V6：空输入下拉全量；>10 产品不撞色 + 图例滚动（仅 1440 视口跑一次，控制时长）
+    if tag == "1440x900":
+        # 点选后 JS 已清空输入框，用点击聚焦触发 focus 监听重渲染（fill('') 不触发 input 事件）
+        page.click("#product-pick")
+        page.wait_for_timeout(500)
+        n_all = js(page, "document.querySelectorAll('#product-suggest .suggest-item').length")
+        check(n_all >= 40, f"{P} 空输入下拉全量产品", f"{n_all} 条")
+        page.evaluate("() => { const b = document.querySelector('#product-suggest .suggest-item'); if (b) b.click(); }")
+        page.wait_for_timeout(600)
+        for _ in range(24):
+            n_chips = js(page, "document.querySelectorAll('#chips-row .legend-chip').length")
+            if n_chips >= 20:
+                break
+            page.click("#product-pick")
+            page.wait_for_timeout(400)
+            page.evaluate("""() => {
+              const items = [...document.querySelectorAll('#product-suggest .suggest-item')];
+              const t = items.find(b => {
+                const n = b.querySelector('.suggest-name');
+                return n && !n.textContent.trim().startsWith('✓');
+              });
+              if (t) t.click();
+            }""")
+            page.wait_for_timeout(600)
+        n_chips = js(page, "document.querySelectorAll('#chips-row .legend-chip').length")
+        check(n_chips >= 11, f"{P} 11+ 产品可选无上限", f"{n_chips} chips")
+        colors = js(page, """(() => {
+          const o = echarts.getInstanceByDom(document.getElementById('chart')).getOption();
+          return { n: o.series.length, c: [...new Set(o.series.map(s => s.lineStyle.color))].length };
+        })()""")
+        check(colors["n"] >= 11 and colors["c"] == colors["n"], f"{P} >10 产品颜色不重复",
+              f"series={colors['n']} 色数={colors['c']}")
+        legend_ok = js(page, """(() => {
+          const el = document.getElementById('chips-row');
+          return el.scrollHeight > el.clientHeight + 1;
+        })()""")
+        check(legend_ok, f"{P} 图例超限滚动")
+        page.reload()
+        wait_ready(page, "trends")
+
     if SHOOT:
         page.screenshot(path=str(OUT / f"trends-{tag}.png"))
 
@@ -267,48 +312,38 @@ def verify_reports(page, w, h, tag):
       })()
     """)
     if w >= 1100:
-        check(rows_visible >= 8, f"{P} 分类数据首屏 ≥8 行", f"{rows_visible} 行")
+        check(rows_visible >= 8, f"{P} 价格对比首屏 ≥8 行", f"{rows_visible} 行")
 
-    # V5：分类多选（下拉 + chips 累积；两个分类同时查）
-    cat_w = js(page, "document.getElementById('ds-cat-pick').getBoundingClientRect().width")
-    check(cat_w <= 200, f"{P} 分类框宽度克制", f"{cat_w:.0f}px")
-    page.evaluate("() => document.getElementById('ds-cat-pick').click()")
+    # V6：产品多选（下拉全量 40 条 + chips 累积 + 跨单位对比）
+    pick_w = js(page, "document.getElementById('ds-prod-pick').getBoundingClientRect().width")
+    check(pick_w <= 200, f"{P} 产品框宽度克制", f"{pick_w:.0f}px")
+    page.evaluate("() => document.getElementById('ds-prod-pick').click()")
     page.wait_for_timeout(400)
+    n_items = js(page, "document.querySelectorAll('#ds-prod-suggest .suggest-item').length")
+    check(n_items == 40, f"{P} 产品下拉全量 40 条", f"{n_items} 条")
     page.evaluate("""() => {
-      const items = [...document.querySelectorAll('#ds-cat-suggest .suggest-item')];
-      if (items[0]) items[0].click();
-    }""")
-    page.wait_for_timeout(700)
-    page.evaluate("() => document.getElementById('ds-cat-pick').click()")
-    page.wait_for_timeout(400)
-    page.evaluate("""() => {
-      const items = [...document.querySelectorAll('#ds-cat-suggest .suggest-item')];
-      if (items[1]) items[1].click();
+      const items = [...document.querySelectorAll('#ds-prod-suggest .suggest-item')];
+      const t = items.find(b => b.textContent.includes('碳酸锂'));
+      if (t) t.click();
     }""")
     page.wait_for_timeout(900)
-    chips_n = js(page, "document.querySelectorAll('#ds-cat-chips .legend-chip').length")
-    check(chips_n == 2, f"{P} 分类多选 chips 累积", f"{chips_n} chips")
-    # 多分类结果行受限在所选分类内
-    cats_in_view = js(page, """
-      [...new Set([...document.querySelectorAll('#ds-scroll tbody td.ds-cat')].map(td => td.textContent.trim()))]
-    """)
-    check(len(cats_in_view) <= 2, f"{P} 多分类过滤生效", str(cats_in_view))
-
-    # 分页可访问、不遮挡最后一行
-    pager_ok = js(page, """
-      (() => {
-        const pager = document.querySelector('.pager-bar');
-        const p = pager.getBoundingClientRect();
-        const doc = document.documentElement;
-        window.scrollTo(0, doc.scrollHeight);
-        const p2 = pager.getBoundingClientRect();
-        const rows = [...document.querySelectorAll('#ds-scroll tbody tr')];
-        const last = rows[rows.length - 1].getBoundingClientRect();
-        return { inDoc: p2.top < window.innerHeight, lastAbovePager: last.bottom <= p2.top + 1 };
-      })()
-    """)
-    check(pager_ok["inDoc"], f"{P} 分页随页面可达")
-    page.evaluate("() => window.scrollTo(0, 0)")
+    page.evaluate("() => document.getElementById('ds-prod-pick').click()")
+    page.wait_for_timeout(400)
+    page.evaluate("""() => {
+      const items = [...document.querySelectorAll('#ds-prod-suggest .suggest-item')];
+      const t = items.find(b => b.textContent.includes('100Ah'));
+      if (t) t.click();
+    }""")
+    page.wait_for_timeout(900)
+    chips_n = js(page, "document.querySelectorAll('#ds-prod-chips .legend-chip').length")
+    check(chips_n == 2, f"{P} 产品多选 chips 累积", f"{chips_n} chips")
+    txt = js(page, "document.getElementById('ds-scroll').textContent")
+    check("碳酸锂" in txt and "100Ah" in txt, f"{P} 对比结果含两产品", txt[:60])
+    check("元/吨" in txt and "元/Wh" in txt, f"{P} 跨单位同表对比", "")
+    check(js(page, "document.getElementById('ds-from').value !== '' && document.getElementById('ds-to').value !== ''"),
+          f"{P} 日期范围默认已填")
+    check(not js(page, "!!document.querySelector('#tab-dataset .pager-bar')"), f"{P} 无分页条")
+    check(not js(page, "!!document.querySelector('#tab-dataset .pager-info')"), f"{P} 无分页信息")
 
     # 切月报 → 分类表格完全退出
     page.evaluate("() => document.querySelector('#tab-seg button[data-tab=monthly]').click()")
@@ -332,7 +367,7 @@ def verify_reports(page, w, h, tag):
     # 切回 dataset：状态保留
     page.evaluate("() => document.querySelector('#tab-seg button[data-tab=dataset]').click()")
     page.wait_for_timeout(600)
-    check(js(page, "document.querySelectorAll('#ds-scroll tbody tr').length > 0"), f"{P} 切回分类数据正常")
+    check(js(page, "document.querySelectorAll('#ds-scroll tbody tr').length > 0"), f"{P} 切回价格对比正常")
 
     if SHOOT:
         page.screenshot(path=str(OUT / f"reports-{tag}.png"))

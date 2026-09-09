@@ -18,7 +18,7 @@ const qstate = {
 const STATUS_TAG = {
   confirmed: "",
   confirmed_renamed: '<span class="pnote pnote-warn">口径已调整</span>',
-  unavailable_merged: '<span class="pnote pnote-up">暂无独立报价</span>',
+  unavailable_merged: '<span class="pnote pnote-up">暂无数据</span>',
 };
 
 const FREQ_TAG = {
@@ -290,7 +290,7 @@ function rowHtml(r) {
   subParts.push(`${r.organization} · ${r.info_category}`);
   const subLine = `<div class="product-spec">${escHtml(subParts.join(" · "))}</div>`;
   const cells = noQuote
-    ? `<td class="num-cell" colspan="4"><span style="color:var(--ink-3)">暂无独立报价（口径说明见展开详情）</span></td>`
+    ? `<td class="num-cell" colspan="4"><span style="color:var(--ink-3)">暂无数据（口径说明见展开详情）</span></td>`
     : `
       <td class="num-cell">${q ? priceText(q.min_price) : "—"}</td>
       <td class="num-cell">${q ? priceText(q.max_price) : "—"}</td>
@@ -337,7 +337,7 @@ function detailHtml(r) {
          <span class="v num">最低 ${priceText(q.min_price)} · 最高 ${priceText(q.max_price)} ·
          日均价 ${priceText(q.average_price)} · 涨跌 ${priceText(q.change_value)} ${escHtml(q.unit)}
          · 报价日期 ${q.price_date}</span></div>`
-    : `<div class="detail-item"><span class="k">当前报价</span><span class="v">暂无独立报价</span></div>`;
+    : `<div class="detail-item"><span class="k">当前报价</span><span class="v">暂无数据</span></div>`;
   return `
   <div class="detail-grid">
     <div class="detail-item"><span class="k">完整业务规格</span>
