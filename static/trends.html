@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>价格走势 · 华友锂电行情数据中心</title>
-<link rel="stylesheet" href="/static/css/app.css?v=4">
+<title>价格走势 · 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/app.css?v=5">
 </head>
 <body data-page="trends">
 <div id="navbar"></div>
@@ -32,7 +32,7 @@
       <label for="product-pick">产品</label>
       <div class="search-wrap">
         <input class="ctl search-input" id="product-pick" type="text" autocomplete="off"
-               placeholder="搜索并选择产品（最多 5 个，仅限同单位），如：碳酸锂、三元材料、100Ah">
+               placeholder="搜索并点击添加产品（可多选、可跨单位对比），如：碳酸锂、三元材料、100Ah">
         <span class="search-icon">⌕</span>
         <div class="search-suggest" id="product-suggest"></div>
       </div>
@@ -83,7 +83,7 @@
       <div><b>区间带</b>为同报价日期「最低—最高价」，非置信区间；曲线为所选指标（日均价/最低价/最高价）。</div>
       <div><b>真实时间轴</b>：缺报日期不补点、不插值、不填 0；周报价品种按实际发布报价点绘制。</div>
       <div><b>区间变化</b> = 所选区间内首、末有效报价的差值（按实际报价日期，非源字段当日涨跌）；数据不足时显示「—」。</div>
-      <div><b>对比约束</b>：不同单位的产品不会出现在同一坐标轴（最多同时 5 个）。</div>
+      <div><b>多产品对比</b>：不限制产品数量；≤2 种单位自动分左右双坐标轴（右轴标注单位），超过 2 种单位仅并列展示并提示数值不可直接比较。</div>
       <div><b>Tooltip</b> 展示完整报价日期（YYYY-MM-DD）与同一条采集记录的最低/最高/日均价与涨跌。</div>
     </div>
   </details>
@@ -93,10 +93,10 @@
 <div id="footer"></div>
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/echarts.min.js?v=4"></script>
-<script src="/static/js/api.js?v=4"></script>
-<script src="/static/js/common.js?v=4"></script>
-<script src="/static/js/nav.js?v=4"></script>
-<script src="/static/js/trends.js?v=4"></script>
+<script src="/static/js/echarts.min.js?v=5"></script>
+<script src="/static/js/api.js?v=5"></script>
+<script src="/static/js/common.js?v=5"></script>
+<script src="/static/js/nav.js?v=5"></script>
+<script src="/static/js/trends.js?v=5"></script>
 </body>
 </html>

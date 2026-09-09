@@ -31,8 +31,8 @@
 | 门户账号 | huayou（普通）/ admin（管理员），库 `/var/lib/smm-fileserver/auth.db`（PBKDF2-SHA256，0600，Web 不可达） |
 | 钉钉 | 已配置（每日采集完成后推送日报 + Excel 下载链接） |
 | Git 分支 | ⚠️ 服务器部署于 **feature/auth-admin-dashboard**（领先 origin/main **7 个提交**），生产 = 此分支，勿在 main 上操作 |
-| 测试 | **249 passed**（pytest 24.3s；含 portal_service/monthly_report 23 个新测试） |
-| 门户重构 | ✅ 2026-09-06 完成「业务品种映射 + 每日报价/价格走势/数据与报表」重构并**已部署生产（19:58）**；当晚 **V3 深色视觉专项重构已部署**（墨蓝石墨行情工作台，规范 `docs/portal-visual-spec-v3.md`）；**2026-09-07 V4 回归修复已部署**（趋势页去明细表+摘要行、报表双 Tab 互斥、质量/运维深色统一、202 项浏览器断言全过）；8899 预览指向 repo static/，见 `DEPLOYMENT_STATUS_2026-09-06.md` §七/§八 |
+| 测试 | **253 passed**（pytest；含 portal_service/monthly_report 及 V5 dataset 多分类/基础金属测试） |
+| 门户重构 | ✅ 2026-09-06「业务品种映射+每日报价/价格走势/数据与报表」重构已部署；V3 深色（09-06 晚）、V4 回归修复（09-07）均已部署；**2026-09-09 V5 业务升级**（华友展示层清理/多选交互/蓝白浅色，214 项浏览器断言全过，详见 `DEPLOYMENT_STATUS_2026-09-09.md`）：8899 预览已验收，生产 8888 待用户确认后重启 |
 
 ### 文档现状（哪些可信）
 
@@ -127,7 +127,7 @@
 │   │                            #   index=每日报价 / trends=价格走势 / reports=数据与报表
 │   │                            #   （旧）today/history/topics/quality/admin + login/register/account/403
 │   │                            #   css/app.css=新设计系统；js/common/quotes/trends/reports.js=新版逻辑
-├── tests/                       # 226 个测试（fixtures 不依赖真实网络）
+├── tests/                       # 253 个测试（fixtures 不依赖真实网络）
 ├── data/                        # gitignore
 │   ├── auth/                    # storage_state.json（合并了锂电+基础金属登录态）
 │   ├── database/                # smm_lithium.db

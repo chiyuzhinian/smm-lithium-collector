@@ -1,23 +1,26 @@
-/* 价格走势：单产品区间带+指标曲线 / 同单位多产品对比（趋势分析页，无底部明细表）
-   V4：图例整合图表头 · 单品种紧凑摘要行 · 日期标签无裁切 · 图表随容器 resize */
+/* 价格走势：单产品区间带+指标曲线 / 多产品对比（趋势分析页，无底部明细表）
+   V5：点选多产品不限数量；跨单位自动双 Y 轴（>2 种单位提示不可比）；
+   调色板 10 色槽位稳定；图例带单位；区间内无点标「暂无历史价格」；
+   无选择显示引导；图表高度随系列数自适应；浅色主题常量。 */
 "use strict";
 
-/* 多序列分类色：dataviz validate_palette.js 已对 #151F30 暗色表面验证通过
-   （CVD 相邻 ΔE≥8.4 / 正常视觉 ≥19.3 / 对比 ≥3:1），槽位固定不循环 */
-const SERIES_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"];
-const BRAND_BLUE = "#7DA7FF";
-const BAND_FILL = "rgba(125, 167, 255, 0.10)";
-const BAND_EDGE = "rgba(125, 167, 255, 0.30)";
-const MAX_COMPARE = 5;
+/* 多序列分类色：10 色槽位（浅色表面友好，色相区分大），槽位随产品稳定不循环 */
+const SERIES_COLORS = [
+  "#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed",
+  "#0891b2", "#db2777", "#65a30d", "#ea580c", "#0d9488",
+];
+const BRAND_BLUE = "#2563eb";
+const BAND_FILL = "rgba(37, 99, 235, 0.10)";
+const BAND_EDGE = "rgba(37, 99, 235, 0.30)";
 
-/* 暗色图表常量（与 app.css 令牌一致） */
+/* 浅色图表常量（与 app.css 浅色令牌一致） */
 const CHART = {
-  axis: "#2A3A50",
-  label: "#8B9BB4",
-  split: "rgba(42, 58, 80, .55)",
-  tipBg: "#1B283D",
-  tipBorder: "#2A3A50",
-  tipText: "#E6EDF7",
+  axis: "#CBD5E1",
+  label: "#64748B",
+  split: "rgba(226, 232, 240, .9)",
+  tipBg: "#FFFFFF",
+  tipBorder: "#E2E8F0",
+  tipText: "#1E293B",
 };
 
 const tstate = {
@@ -58,14 +61,11 @@ async function init() {
   });
   tstate.ro.observe(document.getElementById("chart"));
 
-  // URL 参数：/trends?ids=a,b&from=&to=
+  // URL 参数：/trends?ids=a,b&from=&to=；无参数 = 空选择（引导用户点选）
   const params = new URLSearchParams(location.search);
-  let ids = (params.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!ids.length) ids = ["lce_battery"];
+  const ids = (params.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean);
   for (const id of ids) {
-    if (tstate.selected.length < MAX_COMPARE && tstate.products.some((p) => p.id === id)) {
-      addProduct(id, true);
-    }
+    if (tstate.products.some((p) => p.id === id)) addProduct(id, true);
   }
   if (params.get("from")) { tstate.range = "custom"; tstate.from = params.get("from"); tstate.to = params.get("to"); }
   syncRangeUI();
@@ -174,15 +174,6 @@ function renderSuggest(q) {
 function addProduct(id, silent) {
   const p = tstate.products.find((x) => x.id === id);
   if (!p || tstate.selected.includes(id)) return;
-  if (tstate.selected.length >= MAX_COMPARE) {
-    if (!silent) notify(`最多同时对比 ${MAX_COMPARE} 个产品`, "error");
-    return;
-  }
-  const first = tstate.products.find((x) => x.id === tstate.selected[0]);
-  if (first && first.unit !== p.unit) {
-    if (!silent) notify(`单位不同（${first.unit} / ${p.unit}），不能在同一价格轴对比`, "error");
-    return;
-  }
   tstate.selected.push(id);
   renderChips();
 }
@@ -202,7 +193,7 @@ function colorSlot(id) {
       return i;
     }
   }
-  return 0;
+  return tstate.selected.length % SERIES_COLORS.length;
 }
 
 function chipColor(id) {
@@ -212,8 +203,8 @@ function chipColor(id) {
 /* 图表头：指标/单位/时间范围 + 已选产品图例（含区间带标注） */
 function updateChartHead() {
   const { from, to } = currentWindow();
-  const first = tstate.products.find((p) => p.id === tstate.selected[0]);
-  const unit = first ? first.unit : (tstate.series[0] && tstate.series[0].unit) || "";
+  const units = [...new Set(tstate.series.map((s) => s.unit).filter(Boolean))];
+  const unit = units.length === 1 ? units[0] : (units.length > 1 ? "多单位" : "");
   const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
   const label = tstate.selected.length === 1 ? metricNames[tstate.metric] : "多产品对比";
   document.getElementById("chart-metric-label").textContent = label;
@@ -224,7 +215,19 @@ function updateChartHead() {
 /* 单品种紧凑摘要：期末日均价 · 区间首末变化（带实际日期，非源字段当日涨跌） · 有效报价点数 */
 function renderSummary() {
   const el = document.getElementById("chart-summary");
-  if (tstate.selected.length !== 1) { el.innerHTML = ""; return; }
+  const emptyIds = tstate.series
+    .filter((s) => !s.points || !s.points.length)
+    .map((s) => tstate.products.find((p) => p.id === s.id))
+    .filter(Boolean);
+  const emptyNote = emptyIds.length
+    ? `<span class="status-sep">·</span><span>暂无历史价格：${emptyIds.map((p) => `${escHtml(p.display_name)}（${escHtml(p.unit)}）`).join("、")}</span>` : "";
+  const multiUnitNote = tstate.selected.length > 1 &&
+    new Set(tstate.series.map((s) => s.unit).filter(Boolean)).size > 2
+    ? `<span class="status-sep">·</span><span>所选产品单位超过 2 种，数值不具直接可比性，仅并列展示</span>` : "";
+  if (tstate.selected.length !== 1) {
+    el.innerHTML = emptyNote + multiUnitNote;
+    return;
+  }
   const s = tstate.series.find((x) => x.id === tstate.selected[0]);
   if (!s || !s.points || !s.points.length) { el.innerHTML = ""; return; }
   const pts = s.points.filter((p) => num(p.average_price) !== null);
@@ -257,11 +260,13 @@ function renderChips() {
   const chips = tstate.selected.map((id) => {
     const p = tstate.products.find((x) => x.id === id);
     if (!p) return "";
+    const s = tstate.series.find((x) => x.id === id);
+    const empty = s && (!s.points || !s.points.length);
     const name = p.spec ? `${p.display_name}（${p.spec}）` : p.display_name;
     const multi = tstate.selected.length > 1;
     return `<span class="legend-chip">
       <span class="legend-dot" style="background:${chipColor(id)}"></span>
-      <span class="chip-name" title="${escHtml(name)}">${escHtml(name)}</span>
+      <span class="chip-name" title="${escHtml(name)}">${escHtml(name)}${p.unit ? `<span class="chip-unit">${escHtml(p.unit)}</span>` : ""}${empty ? `<span class="chip-empty">暂无历史价格</span>` : ""}</span>
       ${multi ? `<button class="legend-remove" data-id="${escHtml(id)}" aria-label="移除 ${escHtml(name)}">×</button>` : ""}
     </span>`;
   }).join("");
@@ -282,7 +287,7 @@ function renderChips() {
 /* ── 数据加载 ── */
 
 async function loadData() {
-  if (!tstate.selected.length) return;
+  if (!tstate.selected.length) { tstate.series = []; return; }
   const { from, to } = currentWindow();
   const params = new URLSearchParams();
   params.set("ids", tstate.selected.join(","));
@@ -318,10 +323,24 @@ function renderChart() {
   const s = tstate.series.find((x) => x.id === tstate.selected[0]);
   updateChartHead();
   renderSummary();
+  // 图表高度随系列数自适应（单产品回落 CSS clamp）
+  if (!single) {
+    el.style.height = Math.min(360 + (tstate.selected.length - 1) * 70, 920) + "px";
+  } else {
+    el.style.height = "";
+  }
+  if (!tstate.selected.length) {
+    tstate.chart.clear();
+    tstate.chart.setOption({
+      title: { text: "请搜索并添加产品（可多选、可跨单位）", left: "center", top: "middle",
+               textStyle: { color: CHART.label, fontSize: 13, fontWeight: 400 } },
+    });
+    return;
+  }
   if (!s || !s.points || !s.points.length) {
     tstate.chart.clear();
     tstate.chart.setOption({
-      title: { text: "暂无数据", left: "center", top: "middle",
+      title: { text: single ? "暂无数据" : "所选产品在该时间范围内暂无历史价格", left: "center", top: "middle",
                textStyle: { color: CHART.label, fontSize: 13, fontWeight: 400 } },
     });
     return;
@@ -342,11 +361,11 @@ function axisCommon() {
       borderWidth: 1,
       padding: [10, 12],
       textStyle: { color: CHART.tipText, fontSize: 12 },
-      extraCssText: "box-shadow: 0 8px 24px rgba(4,8,16,.55); border-radius: 8px;",
+      extraCssText: "box-shadow: 0 8px 24px rgba(15, 23, 42, .14); border-radius: 8px;",
       axisPointer: {
         type: "cross",
-        lineStyle: { color: "rgba(139, 155, 180, .5)" },
-        crossStyle: { color: "rgba(139, 155, 180, .5)" },
+        lineStyle: { color: "rgba(100, 116, 139, .5)" },
+        crossStyle: { color: "rgba(100, 116, 139, .5)" },
         label: { backgroundColor: CHART.tipBorder, color: CHART.tipText },
       },
     },
@@ -414,14 +433,25 @@ function singleOption(s) {
   return base;
 }
 
-/* 多产品对比：同单位、统一日期窗口、稳定配色（颜色跟随产品）；不计算综合均价 */
+/* 多产品对比：统一日期窗口、稳定配色（颜色跟随产品）；不计算综合均价。
+   ≤2 种单位 → 按单位分左右双 Y 轴；>2 种单位 → 单轴并列 + series 名标注单位。 */
 function multiOption() {
   const allDates = new Set();
   for (const s of tstate.series) s.points.forEach((p) => allDates.add(p.price_date));
   const dates = [...allDates].sort();
+  const units = [...new Set(tstate.series.map((s) => s.unit || "").filter(Boolean))];
+  const dual = units.length === 2;
+  const unitIndex = (u) => (dual ? (u === units[0] ? 0 : 1) : 0);
   const base = axisCommon();
   base.xAxis.data = dates;
   base.xAxis.axisLabel.formatter = axisDateFormatter();
+  if (dual) {
+    base.grid.right = 60;
+    base.yAxis = [
+      { ...base.yAxis, name: units[0], nameTextStyle: { color: CHART.label, fontSize: 11 } },
+      { ...base.yAxis, name: units[1], nameTextStyle: { color: CHART.label, fontSize: 11 } },
+    ];
+  }
   base.tooltip.formatter = (items) => {
     if (!items || !items.length) return "";
     const d = items[0].name;
@@ -431,9 +461,12 @@ function multiOption() {
         <span class="tip-k" style="color:${it.color}">● ${escHtml(it.seriesName)}</span>
         <span class="tip-v">${priceText(p[tstate.metric === "avg" ? "average_price" : tstate.metric + "_price"])} ${escHtml(p.unit)}</span></div>`;
     }).join("");
+    const note = dual
+      ? `双坐标轴：左轴 ${escHtml(units[0])} · 右轴 ${escHtml(units[1])}`
+      : units.length > 2 ? "所选产品单位超过 2 种，数值不具直接可比性" : `同单位（${escHtml(units[0])}）`;
     return `<div class="chart-tip">
       <div class="tip-title">${escHtml(d)}</div>${lines}
-      <div class="tip-note" style="color:var(--ink-3)">同一坐标轴 · 同单位（${escHtml(tstate.series[0].unit)}）</div></div>`;
+      <div class="tip-note" style="color:var(--ink-3)">${note}</div></div>`;
   };
   base.series = tstate.series.map((s) => {
     const color = SERIES_COLORS[colorSlot(s.id)];
@@ -442,9 +475,11 @@ function multiOption() {
       if (!p) return null;   // 该品种当日缺报 → 断点，不补 0、不插值
       return { value: num(p[tstate.metric === "avg" ? "average_price" : tstate.metric + "_price"]), point: p };
     });
+    const unitSuffix = units.length > 2 && s.unit ? `（${s.unit}）` : "";
     return {
-      name: s.display_name + (s.spec ? `（${s.spec}）` : ""),
+      name: s.display_name + (s.spec ? `（${s.spec}）` : "") + unitSuffix,
       type: "line", data, connectNulls: false,
+      yAxisIndex: unitIndex(s.unit || ""),
       lineStyle: { color, width: 2 }, itemStyle: { color },
       symbol: "circle", symbolSize: 5,
     };

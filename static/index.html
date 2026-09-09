@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>每日报价 · 华友锂电行情数据中心</title>
-<link rel="stylesheet" href="/static/css/app.css?v=4">
+<title>每日报价 · 锂电价格与回收业务数据中心</title>
+<link rel="stylesheet" href="/static/css/app.css?v=5">
 </head>
 <body data-page="quotes">
 <div id="navbar"></div>
@@ -30,8 +30,20 @@
     </div>
   </div>
 
-  <!-- 筛选栏（标签与控件同行） -->
+  <!-- 筛选栏（标签与控件同行）：类别 → 产品多选 → 搜索 → 报价日期 -->
   <div class="filter-bar">
+    <div class="field">
+      <label for="cat-select">业务类别</label>
+      <select class="ctl" id="cat-select"><option value="">全部类别</option></select>
+    </div>
+    <div class="field search-field">
+      <label for="prod-pick">产品</label>
+      <div class="search-wrap">
+        <button class="ctl pick-input" id="prod-pick" type="button"
+                aria-haspopup="listbox" title="点击选择产品（可多选、可跨类别累积）">选择产品 ▾</button>
+        <div class="search-suggest" id="prod-suggest"></div>
+      </div>
+    </div>
     <div class="field search-field">
       <label for="q-input">产品搜索</label>
       <div class="search-wrap">
@@ -42,18 +54,11 @@
       </div>
     </div>
     <div class="field">
-      <label for="org-select">组织</label>
-      <select class="ctl" id="org-select"><option value="">全部组织</option></select>
-    </div>
-    <div class="field">
-      <label for="cat-select">业务类别</label>
-      <select class="ctl" id="cat-select"><option value="">全部类别</option></select>
-    </div>
-    <div class="field">
       <label for="asof-input">报价日期</label>
       <input class="ctl" type="date" id="asof-input" title="含当日及更早的最新报价">
     </div>
     <button class="btn" id="reset-btn">重置</button>
+    <div class="chips-row" id="picked-chips"></div>
     <div class="result-count" id="result-count">—</div>
   </div>
 
@@ -80,10 +85,10 @@
 <div id="footer"></div>
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/echarts.min.js?v=4"></script>
-<script src="/static/js/api.js?v=4"></script>
-<script src="/static/js/common.js?v=4"></script>
-<script src="/static/js/nav.js?v=4"></script>
-<script src="/static/js/quotes.js?v=4"></script>
+<script src="/static/js/echarts.min.js?v=5"></script>
+<script src="/static/js/api.js?v=5"></script>
+<script src="/static/js/common.js?v=5"></script>
+<script src="/static/js/nav.js?v=5"></script>
+<script src="/static/js/quotes.js?v=5"></script>
 </body>
 </html>

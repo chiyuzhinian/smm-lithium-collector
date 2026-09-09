@@ -509,3 +509,56 @@ def test_report_detail_reconcilable(db_path, products):
     n = sum(1 for r in range(2, ws.max_row + 1)
             if ws.cell(row=r, column=1).value == 10)
     assert n == 20
+
+
+# ── V5：dataset 多分类 / 基础金属类别 / 月报 49 行守卫 ─────────────
+
+def test_dataset_quotes_multi_category(db_path):
+    """dataset_quotes 支持 categories 多分类并集（分页在多分类上正确）。"""
+    con = ps.open_readonly(db_path)
+    try:
+        payload = ps.dataset_quotes(con, categories=["锂化合物", "镍化合物"],
+                                    page=1, page_size=200)
+        cats = {r["category"] for r in payload["rows"]}
+        assert cats == {"锂化合物", "镍化合物"}
+        single = ps.dataset_quotes(con, category="锂化合物", page=1, page_size=200)
+        assert payload["total"] > single["total"]
+    finally:
+        con.close()
+
+
+def test_dataset_products_multi_category(db_path):
+    """dataset_products 支持 categories 多分类并集。"""
+    con = ps.open_readonly(db_path)
+    try:
+        prods = ps.dataset_products(con, categories=["锂化合物", "电芯"])
+        cats = {p["category"] for p in prods}
+        assert cats == {"锂化合物", "电芯"}
+    finally:
+        con.close()
+
+
+def test_metals_info_category_and_filters(products):
+    """基础金属 3 产品信息类别独立，筛选维度含 8 个类别。"""
+    metals = [p for p in products if p["id"] in ("al_a00", "cu_1e", "ni_1e")]
+    assert len(metals) == 3
+    assert all(p["info_category"] == "基础金属" for p in metals)
+    assert all(p["source"] == "SMM" for p in metals)
+    cats = sorted({p["info_category"] for p in products if p["info_category"]})
+    assert cats == ["基础金属", "废极片", "新电池", "新电芯", "正极材料", "金属", "金属盐", "黑粉"]
+
+
+def test_monthly_payload_49_rows_includes_metals(db_path, products):
+    """月报保持 49 行模板（基础金属 3 行在列，无数据时月均价留空）。"""
+    con = ps.open_readonly(db_path)
+    try:
+        payload = ps.monthly_payload(products, con, "2026-08")
+    finally:
+        con.close()
+    assert len(payload["rows"]) == 49
+    assert payload["summary"]["total_rows"] == 49
+    ids = [r["id"] for r in payload["rows"]]
+    assert ids[:3] == ["al_a00", "cu_1e", "ni_1e"]
+    for r in payload["rows"][:3]:
+        assert r["monthly_avg"] is None  # 合成库无基础金属数据
+        assert r["info_category"] == "基础金属"

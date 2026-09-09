@@ -1,9 +1,9 @@
-"""华友月度业务报表 CLI：按月份从 SQLite 生成报表 Excel（主表+明细+计算说明）。
+"""月度业务报表 CLI：按月份从 SQLite 生成报表 Excel（主表+明细+计算说明）。
 
 用法：
   .venv/bin/python scripts/build_monthly_report.py --month 2026-08
   .venv/bin/python scripts/build_monthly_report.py --month 2026-09   # 未结束月份=期间预览
-输出：data/exports/月度业务报表/华友月度业务报表_{month}.xlsx（不覆盖原始模板/历史文件）
+输出：data/exports/月度业务报表/月度业务报表_{month}.xlsx（不覆盖原始模板/历史文件）
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from smm_collector import monthly_report as mr            # noqa: E402
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="生成华友月度业务报表（依据数据库采集报价）")
+    ap = argparse.ArgumentParser(description="生成月度业务报表（依据数据库采集报价）")
     ap.add_argument("--month", required=True, help="月份 YYYY-MM（未结束月份生成期间预览）")
     args = ap.parse_args()
 

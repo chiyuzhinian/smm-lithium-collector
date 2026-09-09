@@ -1,12 +1,15 @@
-/* 每日报价：40 个 SMM 业务品种最新报价（as_of 日期语义 + 展开详情） */
+/* 每日报价：SMM 业务品种最新报价（as_of 日期语义 + 展开详情）
+   V5：删除组织下拉；分类前移 + 产品多选（chips 跨类别累积）；
+   主列显示 SMM 原始产品名+规格，业务名作副行小字。 */
 "use strict";
 
 const qstate = {
   products: [],   // 全量产品（含 searchable）
-  rows: [],       // 当前筛选后的报价行
+  rows: [],       // 服务端筛选后的报价行
+  visible: [],    // picked 过滤后的展示行
   q: "",
-  org: "",
   cat: "",
+  picked: [],     // 有序产品 id（跨类别累积）
   asOf: "",
   filters: {},
   expanded: new Set(),
@@ -51,16 +54,22 @@ function bindFilters() {
     renderSuggest();
   });
   document.getElementById("q-input").addEventListener("focus", () => renderSuggest(true));
+  document.getElementById("prod-pick").addEventListener("click", () => {
+    const box = document.getElementById("prod-suggest");
+    if (box.classList.contains("open")) box.classList.remove("open");
+    else renderProdSuggest(true);
+  });
   document.addEventListener("click", (e) => {
     const s = document.getElementById("q-suggest");
     if (s && !e.target.closest(".search-wrap")) s.classList.remove("open");
-  });
-  document.getElementById("org-select").addEventListener("change", async (e) => {
-    qstate.org = e.target.value;
-    await refresh();
+    const p = document.getElementById("prod-suggest");
+    if (p && !e.target.closest("#prod-pick") && !e.target.closest("#prod-suggest")) {
+      p.classList.remove("open");
+    }
   });
   document.getElementById("cat-select").addEventListener("change", async (e) => {
     qstate.cat = e.target.value;
+    document.getElementById("prod-suggest").classList.remove("open");
     await refresh();
   });
   document.getElementById("asof-input").addEventListener("change", async (e) => {
@@ -68,30 +77,25 @@ function bindFilters() {
     await refresh();
   });
   document.getElementById("reset-btn").addEventListener("click", () => {
-    qstate.q = ""; qstate.org = ""; qstate.cat = ""; qstate.asOf = "";
+    qstate.q = ""; qstate.cat = ""; qstate.picked = []; qstate.asOf = "";
     document.getElementById("q-input").value = "";
-    document.getElementById("org-select").value = "";
     document.getElementById("cat-select").value = "";
     document.getElementById("asof-input").value = "";
     document.getElementById("q-suggest").classList.remove("open");
+    document.getElementById("prod-suggest").classList.remove("open");
+    renderPickedChips();
     refresh();
   });
   document.getElementById("btn-trends").addEventListener("click", (e) => {
-    const ids = qstate.rows.map((r) => r.id);
+    const ids = qstate.picked.length ? qstate.picked : qstate.visible.map((r) => r.id);
     if (ids.length) {
       e.preventDefault();
-      location.href = "/trends?ids=" + encodeURIComponent(ids.slice(0, 6).join(","));
+      location.href = "/trends?ids=" + encodeURIComponent(ids.join(","));
     }
   });
 }
 
 function fillSelects(data) {
-  const orgSel = document.getElementById("org-select");
-  for (const o of data.filters.organizations || []) {
-    const op = document.createElement("option");
-    op.value = o; op.textContent = o;
-    orgSel.appendChild(op);
-  }
   const catSel = document.getElementById("cat-select");
   for (const c of data.filters.info_categories || []) {
     const op = document.createElement("option");
@@ -143,6 +147,72 @@ function renderSuggest(forceOpen) {
   box.classList.add("open");
 }
 
+/* ── 产品多选下拉（级联类别；选中项跨类别累积） ── */
+
+function categoryProducts() {
+  if (!qstate.cat) return qstate.products;
+  return qstate.products.filter((p) => p.info_category === qstate.cat);
+}
+
+function renderProdSuggest(open) {
+  const box = document.getElementById("prod-suggest");
+  if (!open) { box.classList.remove("open"); return; }
+  const hits = categoryProducts();
+  if (!hits.length) {
+    box.innerHTML = `<div class="suggest-empty">该类别下没有产品</div>`;
+  } else {
+    box.innerHTML = hits.map((p) => {
+      const picked = qstate.picked.includes(p.id);
+      return `<button type="button" class="suggest-item" data-id="${escHtml(p.id)}">
+        <div class="suggest-name">${picked ? "✓ " : ""}${escHtml(p.display_name)}
+          ${p.spec ? `<span style="font-weight:400;color:var(--ink-3)"> · ${escHtml(p.spec.slice(0, 32))}${p.spec.length > 32 ? "…" : ""}</span>` : ""}
+          <span style="float:right;color:var(--ink-3);font-size:11px">${escHtml(p.unit)}</span></div>
+        <div class="suggest-spec">SMM ${escHtml((p.series[0] || {}).product_name || "")} · ${escHtml(p.info_category)}</div>
+      </button>`;
+    }).join("");
+    box.querySelectorAll(".suggest-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        togglePicked(btn.dataset.id);
+        box.classList.remove("open");
+      });
+    });
+  }
+  box.classList.add("open");
+}
+
+function togglePicked(id) {
+  const i = qstate.picked.indexOf(id);
+  if (i >= 0) qstate.picked.splice(i, 1);
+  else qstate.picked.push(id);
+  renderPickedChips();
+  applyPickedFilter();
+}
+
+function renderPickedChips() {
+  const row = document.getElementById("picked-chips");
+  row.innerHTML = qstate.picked.map((id) => {
+    const p = qstate.products.find((x) => x.id === id);
+    if (!p) return "";
+    const name = p.spec ? `${p.display_name}（${p.spec}）` : p.display_name;
+    return `<span class="legend-chip">
+      <span class="chip-name" title="${escHtml(name)}">${escHtml(name)}</span>
+      <button class="legend-remove" data-id="${escHtml(id)}" aria-label="移除 ${escHtml(name)}">×</button>
+    </span>`;
+  }).join("");
+  row.querySelectorAll(".legend-remove").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      togglePicked(btn.dataset.id);
+    });
+  });
+}
+
+function applyPickedFilter() {
+  qstate.visible = qstate.picked.length
+    ? qstate.rows.filter((r) => qstate.picked.includes(r.id))
+    : qstate.rows;
+  renderTable();
+}
+
 /* ── 数据加载 ── */
 
 async function refresh() {
@@ -150,13 +220,12 @@ async function refresh() {
   scroll.innerHTML = loadingHtml("正在加载最新报价…");
   const params = new URLSearchParams();
   if (qstate.asOf) params.set("as_of", qstate.asOf);
-  if (qstate.org) params.set("org", qstate.org);
   if (qstate.cat) params.set("info_category", qstate.cat);
   try {
     const data = await API.get("/api/portal/quotes?" + params.toString(), 15000);
     qstate.rows = data.rows;
     updateStatus(data);
-    renderTable();
+    applyPickedFilter();
   } catch (err) {
     scroll.innerHTML = emptyHtml("⚠️", "报价加载失败：" + err.message);
   }
@@ -170,9 +239,9 @@ function updateStatus(data) {
     if (r.quote && r.quote.collected_at > latestCollected) latestCollected = r.quote.collected_at;
   }
   document.getElementById("st-collected").textContent = latestCollected === "—" ? "—" : fmtTs(latestCollected);
-  document.getElementById("st-count").textContent = data.rows.length;
+  document.getElementById("st-count").textContent = qstate.visible.length;
   document.getElementById("result-count").innerHTML =
-    `共 <b>${data.rows.length}</b> 个业务品种` +
+    `共 <b>${qstate.visible.length}</b> 个业务品种` +
     (qstate.asOf ? ` · 截至 <b class="num">${escHtml(qstate.asOf)}</b> 的最新报价` : " · 最新可用报价");
 }
 
@@ -180,14 +249,14 @@ function updateStatus(data) {
 
 function renderTable() {
   const scroll = document.getElementById("table-scroll");
-  if (qstate.rows.length === 0) {
+  if (qstate.visible.length === 0) {
     scroll.innerHTML = emptyHtml("📭", "没有符合条件的品种，请调整筛选条件");
     return;
   }
   const head = `
   <table class="data-table">
     <thead><tr>
-      <th>业务产品 / 规格</th>
+      <th>SMM 产品 / 规格</th>
       <th class="num-cell">最低价</th>
       <th class="num-cell">最高价</th>
       <th class="num-cell">日均价</th>
@@ -197,7 +266,7 @@ function renderTable() {
       <th class="num-cell">采集更新</th>
       <th class="ctr">频次</th>
     </tr></thead>
-    <tbody id="quotes-tbody">${qstate.rows.map(rowHtml).join("")}</tbody>
+    <tbody id="quotes-tbody">${qstate.visible.map(rowHtml).join("")}</tbody>
   </table>`;
   scroll.innerHTML = head;
   scroll.querySelectorAll(".expand-btn").forEach((btn) => {
@@ -210,9 +279,14 @@ function rowHtml(r) {
   const statusTag = STATUS_TAG[r.mapping_status] || "";
   const freqTag = FREQ_TAG[r.frequency] || "";
   const noQuote = r.mapping_status === "unavailable_merged";
-  /* 第二层：规格 · 组织 · 类别（空规格不占行、不显示「—」） */
+  /* 主行 = SMM 原始产品名 + 规格（与采集库一致，不手工简化）；
+     副行 = 业务名 · 业务规格 · 板块 · 类别 */
+  const smmName = (q && q.product_name) || (r.series[0] || {}).product_name || "";
+  const smmSpec = (q && q.specification) || (r.series[0] || {}).specification || "";
+  const primary = smmName + (smmSpec ? ` / ${smmSpec}` : "");
   const subParts = [];
-  if (r.spec) subParts.push(r.spec);
+  if (r.display_name && r.display_name !== smmName) subParts.push(`业务名 ${r.display_name}`);
+  if (r.spec && (!smmSpec || r.spec !== smmSpec)) subParts.push(r.spec);
   subParts.push(`${r.organization} · ${r.info_category}`);
   const subLine = `<div class="product-spec">${escHtml(subParts.join(" · "))}</div>`;
   const cells = noQuote
@@ -227,7 +301,7 @@ function rowHtml(r) {
     <td class="product-cell">
       <div class="product-name-row">
         <button class="expand-btn" data-id="${escHtml(r.id)}" aria-label="展开详情">▸</button>
-        <span class="product-name">${escHtml(r.display_name)}</span>
+        <span class="product-name">${escHtml(primary)}</span>
         <span class="pname-tags">${statusTag}</span>
       </div>
       ${subLine}

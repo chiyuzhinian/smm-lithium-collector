@@ -60,19 +60,21 @@ CONTRAST = """
 """
 
 
-def find_white_blocks(page, root_sel):
-    """返回 main 区域内背景亮度 > 0.8 的可疑元素（白色残留）。"""
+def find_dark_blocks(page, root_sel):
+    """返回 main 区域内背景亮度 < 0.15 的可疑元素（深色残留，V5 浅色主题下不应出现）。"""
     return js(page, f"""
       (() => {{
         const out = [];
         document.querySelectorAll({root_sel!r} + ' *').forEach((el) => {{
           const s = getComputedStyle(el);
           if (s.display === 'none' || s.visibility === 'hidden') return;
-          const m = s.backgroundColor.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+          const m = s.backgroundColor.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?/);
           if (!m) return;
+          const alpha = m[4] === undefined ? 1 : +m[4];
+          if (alpha < 0.05) return;   // 透明背景不算深色残留
           const [r, g, b] = [+m[1], +m[2], +m[3]];
           const lum = (0.2126*r + 0.7152*g + 0.0722*b) / 255;
-          if (lum > 0.85) {{
+          if (lum < 0.15) {{
             const rect = el.getBoundingClientRect();
             if (rect.width > 40 && rect.height > 20)
               out.push({{ tag: el.tagName, cls: String(el.className).slice(0, 40), bg: s.backgroundColor }});
@@ -144,6 +146,19 @@ def verify_trends(page, w, h, tag):
     check(not js(page, "!!document.getElementById('detail-loading')"), f"{P} 无明细空容器残留")
     check(no_h_overflow(page), f"{P} 无横向溢出")
 
+    # V5：默认空选择 → 引导文案（ECharts title 渲染在 canvas，读 option 而非 textContent）
+    empty_txt = js(page, """(() => {
+      const c = echarts.getInstanceByDom(document.getElementById('chart'));
+      if (!c) return '';
+      const t = c.getOption().title;
+      return (t && t[0] && t[0].text) || '';
+    })()""")
+    check("添加产品" in (empty_txt or ""), f"{P} 默认空选择显示引导", (empty_txt or "")[:50])
+    page.fill("#product-pick", "碳酸锂")
+    page.wait_for_timeout(400)
+    page.evaluate("() => { const b = document.querySelector('#product-suggest .suggest-item'); if (b) b.click(); }")
+    page.wait_for_timeout(1200)
+
     ch = js(page, "document.getElementById('chart').getBoundingClientRect().height")
     if w >= 860:
         check(360 <= ch <= 500, f"{P} 图表高度 360-500px", f"{ch:.0f}px")
@@ -188,14 +203,26 @@ def verify_trends(page, w, h, tag):
     check(tip_ok["ok"] and "报价日期" in tip_ok["text"] and "日均价" in tip_ok["text"],
           f"{P} Tooltip 完整且不越界", (tip_ok.get("text") or "")[:60])
 
-    # 多品种 → 摘要行清空
+    # 多品种 → 摘要行清空（同单位单轴）
     page.fill("#product-pick", "磷酸铁锂")
     page.wait_for_timeout(400)
     page.evaluate("() => { const b = document.querySelector('#product-suggest .suggest-item'); if (b) b.click(); }")
-    page.wait_for_timeout(800)
+    page.wait_for_timeout(900)
     chips = js(page, "document.querySelectorAll('#chips-row .legend-chip').length")
     sum2 = js(page, "document.getElementById('chart-summary').textContent")
     check(chips == 2 and str(sum2).strip() == "", f"{P} 多品种仅图例无综合摘要", f"{chips} chips")
+
+    # V5：跨单位自动双 Y 轴（加入 元/Wh 电芯）
+    page.fill("#product-pick", "100Ah")
+    page.wait_for_timeout(400)
+    page.evaluate("() => { const b = document.querySelector('#product-suggest .suggest-item'); if (b) b.click(); }")
+    page.wait_for_timeout(900)
+    yaxes = js(page, "echarts.getInstanceByDom(document.getElementById('chart')).getOption().yAxis")
+    check(isinstance(yaxes, list) and len(yaxes) == 2, f"{P} 跨单位双 Y 轴",
+          f"yAxis 数={len(yaxes) if isinstance(yaxes, list) else 1}")
+    # 移除电芯恢复双产品，继续 resize 检查
+    page.evaluate("() => { const b = document.querySelector('#chips-row .legend-remove'); if (b) b.click(); }")
+    page.wait_for_timeout(900)
 
     # 图表随容器 resize（content-max=1400：视口 >1400 时容器已封顶，跳过）
     if w <= 1400:
@@ -242,9 +269,30 @@ def verify_reports(page, w, h, tag):
     if w >= 1100:
         check(rows_visible >= 8, f"{P} 分类数据首屏 ≥8 行", f"{rows_visible} 行")
 
-    # 分类框宽度克制
-    cat_w = js(page, "document.getElementById('ds-cat').getBoundingClientRect().width")
+    # V5：分类多选（下拉 + chips 累积；两个分类同时查）
+    cat_w = js(page, "document.getElementById('ds-cat-pick').getBoundingClientRect().width")
     check(cat_w <= 200, f"{P} 分类框宽度克制", f"{cat_w:.0f}px")
+    page.evaluate("() => document.getElementById('ds-cat-pick').click()")
+    page.wait_for_timeout(400)
+    page.evaluate("""() => {
+      const items = [...document.querySelectorAll('#ds-cat-suggest .suggest-item')];
+      if (items[0]) items[0].click();
+    }""")
+    page.wait_for_timeout(700)
+    page.evaluate("() => document.getElementById('ds-cat-pick').click()")
+    page.wait_for_timeout(400)
+    page.evaluate("""() => {
+      const items = [...document.querySelectorAll('#ds-cat-suggest .suggest-item')];
+      if (items[1]) items[1].click();
+    }""")
+    page.wait_for_timeout(900)
+    chips_n = js(page, "document.querySelectorAll('#ds-cat-chips .legend-chip').length")
+    check(chips_n == 2, f"{P} 分类多选 chips 累积", f"{chips_n} chips")
+    # 多分类结果行受限在所选分类内
+    cats_in_view = js(page, """
+      [...new Set([...document.querySelectorAll('#ds-scroll tbody td.ds-cat')].map(td => td.textContent.trim()))]
+    """)
+    check(len(cats_in_view) <= 2, f"{P} 多分类过滤生效", str(cats_in_view))
 
     # 分页可访问、不遮挡最后一行
     pager_ok = js(page, """
@@ -301,8 +349,8 @@ def verify_quality(page, w, h, tag):
           f"{P} 不再加载旧 style.css")
     check(no_h_overflow(page), f"{P} 无横向溢出")
 
-    whites = find_white_blocks(page, ".main-container")
-    check(len(whites) == 0, f"{P} 无白色残留区块", whites)
+    darks = find_dark_blocks(page, ".main-container")
+    check(len(darks) == 0, f"{P} 无深色残留区块", darks)
 
     title_contrast = js(page, """
       (() => {
@@ -381,9 +429,9 @@ def verify_admin(page, w, h, tag):
     check(not js(page, "[...document.styleSheets].some(s => (s.href||'').includes('style.css'))"),
           f"{P} 不再加载旧 style.css")
     check(no_h_overflow(page), f"{P} 无横向溢出")
-    check(bg(page, ".admin-sidebar") == "#151F30", f"{P} 侧栏深色", bg(page, ".admin-sidebar"))
-    whites = find_white_blocks(page, ".admin-main")
-    check(len(whites) == 0, f"{P} 无白色卡片残留", whites)
+    check(bg(page, ".admin-sidebar") == "#FFFFFF", f"{P} 侧栏浅色", bg(page, ".admin-sidebar"))
+    darks = find_dark_blocks(page, ".admin-main")
+    check(len(darks) == 0, f"{P} 无深色卡片残留", darks)
 
     # 侧栏 SVG 图标、无 emoji
     svg_count = js(page, "document.querySelectorAll('.admin-nav .svg-icon').length")
@@ -495,10 +543,12 @@ def main():
                       "月报 Excel 关键字段", headers[:9])
                 first_data_col = [c.value for c in ws[2]]
                 check(any("2026" in str(x) or "月" in str(x) for x in first_data_col), "月报 Excel 业务内容")
-                # 组织列（第1列）应有实际组织名
+                # 组织列（第1列）应为中性板块名（V5 改名）
                 orgs = {ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)}
-                check(any(o and "华友" in str(o) or True for o in orgs) and len(orgs) >= 3,
-                      "月报 Excel 组织合并列", f"{len(orgs)} 个组织")
+                NEUTRAL_ORGS = {"回收循环板块", "正极材料板块", "电芯电池板块", "三元材料板块"}
+                check(any(o in NEUTRAL_ORGS for o in orgs) and len(orgs) >= 3
+                      and not any("华友" in str(o) for o in orgs),
+                      "月报 Excel 组织合并列（中性板块名）", f"{len(orgs)} 个组织 {sorted(str(o) for o in orgs)[:4]}")
             else:
                 check(False, "月报 Excel 下载", f"HTTP {resp.status}")
         except Exception as e:

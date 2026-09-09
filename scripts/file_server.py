@@ -1928,11 +1928,12 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
                           "categories": cats})
 
     def _api_portal_dataset_products(self, q: dict):
-        """GET /api/portal/dataset/products?category=：分类下产品清单（下拉）。"""
+        """GET /api/portal/dataset/products?category=|categories=a,b：分类下产品清单（下拉）。"""
         category = (q.get("category") or [None])[0]
+        categories = [c for c in (q.get("categories") or [""])[0].split(",") if c]
         con = _db_conn()
         try:
-            prods = portal_service.dataset_products(con, category)
+            prods = portal_service.dataset_products(con, category=category, categories=categories)
         finally:
             con.close()
         self._serve_json({"meta": {"generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -1940,8 +1941,12 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
                           "products": prods})
 
     def _api_portal_dataset_quotes(self, q: dict):
-        """GET /api/portal/dataset/quotes：全量原始行分页（全部分类入口，不受 40 条业务限制）。"""
+        """GET /api/portal/dataset/quotes：全量原始行分页（全部分类入口，不受 40 条业务限制）。
+
+        categories=a,b 多分类并集（数据与报表分类多选）。
+        """
         category = (q.get("category") or [None])[0]
+        categories = [c for c in (q.get("categories") or [""])[0].split(",") if c]
         product = (q.get("product") or [None])[0]
         kw = (q.get("q") or [None])[0]
         date_from = (q.get("from") or [None])[0]
@@ -1954,7 +1959,7 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         con = _db_conn()
         try:
             payload = portal_service.dataset_quotes(
-                con, category=category, product=product, q=kw,
+                con, category=category, categories=categories, product=product, q=kw,
                 date_from=date_from, date_to=date_to, page=page, page_size=page_size)
         finally:
             con.close()

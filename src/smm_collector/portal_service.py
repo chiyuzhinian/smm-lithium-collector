@@ -718,13 +718,21 @@ def dataset_categories(con: sqlite3.Connection) -> list[dict]:
 def dataset_quotes(con: sqlite3.Connection, category: str | None = None,
                    product: str | None = None, q: str | None = None,
                    date_from: str | None = None, date_to: str | None = None,
-                   page: int = 1, page_size: int = 100) -> dict:
-    """全量原始行分页查询（全部分类；与业务映射无关的全量入口）。"""
+                   page: int = 1, page_size: int = 100,
+                   categories: list[str] | None = None) -> dict:
+    """全量原始行分页查询（全部分类；与业务映射无关的全量入口）。
+
+    categories：多分类并集过滤（空列表=不限定）；category 单值保留向后兼容，
+    两者同传时多分类优先。
+    """
     page = max(1, page)
     page_size = min(200, max(1, page_size))
     conds = ["validation_status != 'invalid'"]
     params: list = []
-    if category:
+    if categories:
+        conds.append(f"category IN ({','.join('?' * len(categories))})")
+        params.extend(categories)
+    elif category:
         conds.append("category = ?")
         params.append(category)
     if product:
@@ -753,11 +761,15 @@ def dataset_quotes(con: sqlite3.Connection, category: str | None = None,
             "rows": [point_payload(dict(r)) for r in rows]}
 
 
-def dataset_products(con: sqlite3.Connection, category: str | None = None) -> list[dict]:
-    """某分类下的产品清单（下拉用）。"""
+def dataset_products(con: sqlite3.Connection, category: str | None = None,
+                     categories: list[str] | None = None) -> list[dict]:
+    """分类下的产品清单（下拉用；categories 多分类并集，空列表=全部）。"""
     conds = ["validation_status != 'invalid'"]
     params: list = []
-    if category:
+    if categories:
+        conds.append(f"category IN ({','.join('?' * len(categories))})")
+        params.extend(categories)
+    elif category:
         conds.append("category = ?")
         params.append(category)
     try:

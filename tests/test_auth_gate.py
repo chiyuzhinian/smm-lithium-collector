@@ -330,7 +330,7 @@ class TestRegister:
         r = request(env.port, "GET", "/register")
         assert r["status"] == 200
         assert "锂电价格与回收业务数据中心" in r["body"]
-        assert "华友内部数据服务" in r["body"]
+        assert "华友" not in r["body"]
         assert "返回登录" in r["body"]
         # 注册页只提供用户名/密码，无任何角色选择
         assert "role" not in r["body"] and "角色" not in r["body"]
@@ -533,7 +533,7 @@ class TestBrandStrings:
         r = request(env.port, "GET", "/login")
         assert "锂电价格与回收业务数据中心" in r["body"]
         assert "SMM 锂电价格与回收业务数据中心" not in r["body"]
-        assert "华友内部数据服务" in r["body"]
+        assert "华友" not in r["body"]
         # 数据来源中的 SMM 保留
         assert "数据来源：SMM 上海有色网公开报价" in r["body"]
 

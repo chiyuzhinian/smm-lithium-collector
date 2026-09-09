@@ -2,7 +2,7 @@
 # 按历史规范顺序排列，不得按字母排序
 
 company_groups:
-  - company: "华友循环"
+  - company: "回收循环板块"
     rows:
       - { material_attribute: "原料", info_category: "金属", chemistry: "铝", detail: "A00铝", unit: "元/吨", source: "SMM", source_type: "additional", product_key: "A00铝" }
       - { material_attribute: "原料", info_category: "金属", chemistry: "铜", detail: "1#电解铜", unit: "元/吨", source: "SMM", source_type: "additional", product_key: "1#电解铜" }
@@ -29,7 +29,7 @@ company_groups:
       - { material_attribute: "原料", info_category: "黑粉", chemistry: "NCM", detail: "NCM黑粉（北美）", unit: "元/吨", source: "Benchmark", source_type: "external", external_key: "ncm_black_powder_na" }
       - { material_attribute: "原料", info_category: "黑粉", chemistry: "NCM", detail: "NCM黑粉（欧洲）", unit: "元/吨", source: "Benchmark", source_type: "external", external_key: "ncm_black_powder_eu" }
 
-  - company: "华友绿能"
+  - company: "正极材料板块"
     rows:
       # 磷酸铁锂正极 - 动力型
       - { material_attribute: "产品", info_category: "正极材料", chemistry: "LFP", detail: "磷酸铁锂正极（动力型压实密度≥2.55g/cm3）", unit: "元/吨", source: "SMM", source_type: "smm", product_key: "磷酸铁锂（动力型）", product_spec: "压实密度≥2.55", category: "正极材料" }
@@ -43,7 +43,7 @@ company_groups:
       - { material_attribute: "产品", info_category: "正极材料", chemistry: "LFP", detail: "修复型磷酸铁锂（高端款，压实密度≥2.55g/cm3）", unit: "元/吨", source: "SMM", source_type: "smm", product_key: "磷酸铁锂（修复型高端）", category: "正极材料" }
       - { material_attribute: "产品", info_category: "正极材料", chemistry: "LFP", detail: "修复型磷酸铁锂（普通款）", unit: "元/吨", source: "SMM", source_type: "smm", product_key: "磷酸铁锂（修复型普通）", category: "正极材料" }
 
-  - company: "华友能源"
+  - company: "电芯电池板块"
     rows:
       # 新电芯
       - { material_attribute: "原料", info_category: "新电芯", chemistry: "NCM", detail: "新523方形三元电芯（50-60Ah）", unit: "元/Wh", source: "SMM", source_type: "smm", product_key: "523方形三元电芯(周）", product_spec: "50-60Ah", category: "电芯" }
@@ -53,12 +53,12 @@ company_groups:
       - { material_attribute: "原料", info_category: "新电芯", chemistry: "LFP", detail: "新方形LFP电芯（100Ah）", unit: "元/Wh", source: "SMM", source_type: "smm", product_key: "方形磷酸铁锂电芯(周)", product_spec: "100Ah", category: "电芯" }
       - { material_attribute: "原料", info_category: "新电芯", chemistry: "LFP", detail: "新方形LFP电芯（174Ah）", unit: "元/Wh", source: "SMM", source_type: "smm", product_key: "方形磷酸铁锂电芯(周)", product_spec: "174Ah", category: "电芯" }
       # 新电池 - 外部数据
-      - { material_attribute: "产品", info_category: "新电池", chemistry: "LFP", detail: "工商业储能系统每度电销售价格（液冷）", unit: "元/Wh", source: "江苏华友客户反馈", source_type: "external", external_key: "ess_liquid_cooling" }
-      - { material_attribute: "产品", info_category: "新电池", chemistry: "LFP", detail: "小动力电池每度电市场价格（6020）", unit: "元/组", source: "江苏华友客户反馈", source_type: "external", external_key: "small_power_6020" }
-      - { material_attribute: "产品", info_category: "新电池", chemistry: "LFP", detail: "小动力电池每度电市场价格（6030）", unit: "元/组", source: "江苏华友客户反馈", source_type: "external", external_key: "small_power_6030" }
-      - { material_attribute: "产品", info_category: "新电池", chemistry: "LFP", detail: "小动力电池每度电市场价格（6050）", unit: "元/组", source: "江苏华友客户反馈", source_type: "external", external_key: "small_power_6050" }
+      - { material_attribute: "产品", info_category: "新电池", chemistry: "LFP", detail: "工商业储能系统每度电销售价格（液冷）", unit: "元/Wh", source: "江苏客户反馈", source_type: "external", external_key: "ess_liquid_cooling" }
+      - { material_attribute: "产品", info_category: "新电池", chemistry: "LFP", detail: "小动力电池每度电市场价格（6020）", unit: "元/组", source: "江苏客户反馈", source_type: "external", external_key: "small_power_6020" }
+      - { material_attribute: "产品", info_category: "新电池", chemistry: "LFP", detail: "小动力电池每度电市场价格（6030）", unit: "元/组", source: "江苏客户反馈", source_type: "external", external_key: "small_power_6030" }
+      - { material_attribute: "产品", info_category: "新电池", chemistry: "LFP", detail: "小动力电池每度电市场价格（6050）", unit: "元/组", source: "江苏客户反馈", source_type: "external", external_key: "small_power_6050" }
 
-  - company: "华宝"
+  - company: "三元材料板块"
     rows:
       - { material_attribute: "产品", info_category: "正极材料", chemistry: "NCM", detail: "5系三元材料（单晶/动力型）", unit: "元/吨", source: "", source_type: "pending", product_key: "5系三元材料（单晶/动力型）" }
       - { material_attribute: "产品", info_category: "正极材料", chemistry: "NCM", detail: "5系三元材料（多晶/消费型）", unit: "元/吨", source: "", source_type: "pending", product_key: "5系三元材料（多晶/消费型）" }

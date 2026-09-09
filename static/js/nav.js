@@ -21,8 +21,8 @@ document.addEventListener("DOMContentLoaded", () => {
     <a class="brand" href="/" style="text-decoration:none">
       <span class="brand-mark">锂</span>
       <span>
-        <div class="brand-name">华友锂电行情数据中心</div>
-        <div class="brand-sub">HUAYOU LITHIUM MARKET DATA</div>
+        <div class="brand-name">锂电价格与回收业务数据中心</div>
+        <div class="brand-sub">LITHIUM PRICE &amp; RECYCLING DATA CENTER</div>
       </span>
     </a>
     <nav class="nav" id="main-nav">${links}</nav>
@@ -35,7 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (footEl) {
     footEl.outerHTML = `
 <div class="footer">
-  <div><b>华友锂电行情数据中心</b> · 数据来源：SMM 上海有色网公开报价（采集器自动采集，采集时间与报价日期分别标注）</div>
+  <div><b>锂电价格与回收业务数据中心</b> · 数据来源：SMM 上海有色网公开报价（采集器自动采集，采集时间与报价日期分别标注）</div>
   <div>日均价为对应报价日期的 SMM 源字段；月均价为依据采集报价计算的期间算术平均，非 SMM 官方月均 · 涨红跌绿</div>
 </div>`;
   }

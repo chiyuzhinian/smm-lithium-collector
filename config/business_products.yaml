@@ -4,7 +4,7 @@
 # 消费方：每日报价首页 / 价格走势 / 月度业务报表（共用同一映射与同一数据服务层）
 #
 # 依据（2026-09-06）：
-#   1) 《华友循环产业集团市场价格数据》最新页「8月28日」49 条业务记录（40 条 SMM）
+#   1) 《市场价格数据模板》最新页「8月28日」49 条业务记录（40 条 SMM）
 #   2) 逐行映射证据：smm_template_mapping.json（34 条明确对应 + 6 条规格待核）
 #   3) SMM 官方公告（磷酸铁锂正极材料价格点调整）：
 #       征询函 2026-03-16 https://news.smm.cn/gonggao/103808001
@@ -27,7 +27,7 @@
 
 version: 1
 meta:
-  name: "业务品种映射（华友市场月报 49 行版式）"
+  name: "业务品种映射（月度业务报表 49 行版式）"
   template_sheet: "8月28日"
   history_from: "2026-07-20"      # 采集起点；门户日期选择下限
   daily_completeness_ratio: 0.8   # 日频品种：当月报价日数/当月预期交易日数 ≥ 该值判完整
@@ -41,140 +41,140 @@ meta:
 #   unavailable_merged       SMM 官方已并入其他价格点，无独立报价 → 显示口径说明，月报留空
 #   manual                   非 SMM 来源，保留原行供人工填写
 products:
-  # ── 华友循环：金属 ──
-  - { id: "al_a00", template_row: 2, organization: 华友循环, material_attribute: 原料, info_category: 金属,
+  # ── 回收循环板块：金属 ──
+  - { id: "al_a00", template_row: 2, organization: 回收循环板块, material_attribute: 原料, info_category: 基础金属,
     template_detail: "A00铝",
       chemistry: 铝, display_name: "A00铝", spec: "", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+单位一致；模板化学类型D2误写'铜'已按详细内容纠正（原始文件保留）",
       series: [{ category: 基础金属, product_name: A00铝, specification: "" }],
       keywords: [A00铝, 铝锭, 电解铝] }
-  - { id: "cu_1e", template_row: 3, organization: 华友循环, material_attribute: 原料, info_category: 金属,
+  - { id: "cu_1e", template_row: 3, organization: 回收循环板块, material_attribute: 原料, info_category: 基础金属,
     template_detail: "1#电解铜",
       chemistry: 铜, display_name: "1#电解铜", spec: "", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+单位一致；模板化学类型D3误写'铝'已按详细内容纠正（原始文件保留）",
       series: [{ category: 基础金属, product_name: 1#电解铜, specification: "" }],
       keywords: [1#电解铜, 电解铜, 阴极铜] }
-  - { id: "ni_1e", template_row: 4, organization: 华友循环, material_attribute: 原料, info_category: 金属,
+  - { id: "ni_1e", template_row: 4, organization: 回收循环板块, material_attribute: 原料, info_category: 基础金属,
     template_detail: "1#电解镍",
       chemistry: 镍, display_name: "1#电解镍", spec: "", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+单位一致；采集 specification 为空，模板未列更细规格",
       series: [{ category: 基础金属, product_name: 1#电解镍, specification: "" }],
       keywords: [1#电解镍, 电解镍, 镍板] }
-  - { id: "co_electrolytic", template_row: 5, organization: 华友循环, material_attribute: 原料, info_category: 金属,
+  - { id: "co_electrolytic", template_row: 5, organization: 回收循环板块, material_attribute: 原料, info_category: 金属,
     template_detail: "电解钴",
       chemistry: 钴, display_name: "电解钴", spec: "Co≥99.8%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+单位一致；排除美元/磅鹿特丹仓库条目",
       spec_source: smm,
       series: [{ category: 钴金属, product_name: 电解钴, specification: "Co≥99.8%" }],
       keywords: [电解钴, 钴, 电解钴片] }
-  - { id: "li_metal_battery", template_row: 6, organization: 华友循环, material_attribute: 原料, info_category: 金属,
+  - { id: "li_metal_battery", template_row: 6, organization: 回收循环板块, material_attribute: 原料, info_category: 金属,
     template_detail: "电池级金属锂",
       chemistry: 锂, display_name: "电池级金属锂", spec: "Li含量≥99.9%，符合 GB/T 4369-2015", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+单位一致；采集规格 Li≥99.9%（GB/T 4369-2015）",
       spec_source: smm,
       series: [{ category: 锂金属, product_name: 电池级金属锂, specification: "Li含量至少99.9%，符合 GB/T 4369-2015" }],
       keywords: [电池级金属锂, 金属锂, 锂锭] }
-  # ── 华友循环：金属盐 ──
-  - { id: "niso4_battery", template_row: 7, organization: 华友循环, material_attribute: 产品, info_category: 金属盐,
+  # ── 回收循环板块：金属盐 ──
+  - { id: "niso4_battery", template_row: 7, organization: 回收循环板块, material_attribute: 产品, info_category: 金属盐,
     template_detail: "电池级硫酸镍",
       chemistry: 硫酸镍, display_name: "电池级硫酸镍", spec: "镍含量≥22%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "按业务表同名现货匹配（非 SMM 指数）；排除'SMM电池级硫酸镍指数'与电镀级条目",
       spec_source: smm,
       series: [{ category: 镍化合物, product_name: 电池级硫酸镍, specification: "镍含量≥22%" }],
       keywords: [电池级硫酸镍, 硫酸镍, 镍盐] }
-  - { id: "coso4", template_row: 8, organization: 华友循环, material_attribute: 产品, info_category: 金属盐,
+  - { id: "coso4", template_row: 8, organization: 回收循环板块, material_attribute: 产品, info_category: 金属盐,
     template_detail: "硫酸钴",
       chemistry: 硫酸钴, display_name: "硫酸钴", spec: "Co≥20.5%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "按业务表同名现货匹配（非 SMM 指数）；排除'SMM硫酸钴指数'",
       spec_source: smm,
       series: [{ category: 钴化合物, product_name: 硫酸钴, specification: "Co≥20.5%" }],
       keywords: [硫酸钴, 钴盐] }
-  - { id: "lce_industrial", template_row: 9, organization: 华友循环, material_attribute: 产品, info_category: 金属盐,
+  - { id: "lce_industrial", template_row: 9, organization: 回收循环板块, material_attribute: 产品, info_category: 金属盐,
     template_detail: "工业级碳酸锂",
       chemistry: 碳酸锂, display_name: "工业级碳酸锂", spec: "Li₂CO₃≥99.2%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称一致；排除'SMM碳酸锂指数'类条目",
       spec_source: smm,
       series: [{ category: 锂化合物, product_name: 工业级碳酸锂, specification: "Li₂CO₃≥99.2%" }],
       keywords: [工业级碳酸锂, 工碳, 碳酸锂, lce] }
-  - { id: "lce_battery", template_row: 10, organization: 华友循环, material_attribute: 产品, info_category: 金属盐,
+  - { id: "lce_battery", template_row: 10, organization: 回收循环板块, material_attribute: 产品, info_category: 金属盐,
     template_detail: "电池级碳酸锂",
       chemistry: 碳酸锂, display_name: "电池级碳酸锂", spec: "Li₂CO₃≥99.5%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称一致（早期模板名后多'价格'已归一）；排除'SMM电池级碳酸锂指数'与CIF美元条目",
       spec_source: smm,
       series: [{ category: 锂化合物, product_name: 电池级碳酸锂, specification: "Li₂CO₃≥99.5%" }],
       keywords: [电池级碳酸锂, 电碳, 碳酸锂, lce] }
-  # ── 华友循环：废极片 / 黑粉 ──
-  - { id: "waste_lfp_power_piece", template_row: 11, organization: 华友循环, material_attribute: 原料, info_category: 废极片,
+  # ── 回收循环板块：废极片 / 黑粉 ──
+  - { id: "waste_lfp_power_piece", template_row: 11, organization: 回收循环板块, material_attribute: 原料, info_category: 废极片,
     template_detail: "废旧LFP动力正极片",
       chemistry: LFP, display_name: "废旧LFP动力正极片", spec: "动力型，3.8%<Li<4.2%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "LFP=磷酸铁锂归一；动力正极片一致；模板未列Li区间，采集为3.8%<Li<4.2%",
       spec_source: smm,
       series: [{ category: 废旧正极片及系数, product_name: 废旧磷酸铁锂动力正极片, specification: "动力型，3.8%<Li<4.2%" }],
       keywords: [废旧LFP动力正极片, 废旧磷酸铁锂动力正极片, 动力正极片, 废极片] }
-  - { id: "waste_lfp_ess_piece", template_row: 12, organization: 华友循环, material_attribute: 原料, info_category: 废极片,
+  - { id: "waste_lfp_ess_piece", template_row: 12, organization: 回收循环板块, material_attribute: 原料, info_category: 废极片,
     template_detail: "废旧LFP储能正极片",
       chemistry: LFP, display_name: "废旧LFP储能正极片", spec: "储能型，3.2%<Li<3.5%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "LFP=磷酸铁锂归一；储能正极片一致；模板未列Li区间，采集为3.2%<Li<3.5%",
       spec_source: smm,
       series: [{ category: 废旧正极片及系数, product_name: 废旧磷酸铁锂储能正极片, specification: "储能型，3.2%<Li<3.5%" }],
       keywords: [废旧LFP储能正极片, 废旧磷酸铁锂储能正极片, 储能正极片, 废极片] }
-  - { id: "black_lfp_piece_powder", template_row: 13, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "black_lfp_piece_powder", template_row: 13, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "LFP极片粉（国内，3.2%＜Li＜4.2%）",
       chemistry: LFP, display_name: "LFP极片粉", spec: "国内，3.2%＜Li＜4.2%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "LFP=磷酸铁锂归一；极片粉与Li区间3.2%-4.2%一致（模板'国内'在采集规格中未单列）",
       series: [{ category: 废旧锂电黑粉价格, product_name: 磷酸铁锂极片粉, specification: "3.2%<Li<4.2%" }],
       keywords: [LFP极片粉, 磷酸铁锂极片粉, 极片粉, 黑粉] }
-  - { id: "black_lfp_cell_powder", template_row: 14, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "black_lfp_cell_powder", template_row: 14, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "LFP电池粉（国内，2.0%＜Li＜2.8%）",
       chemistry: LFP, display_name: "LFP电池粉", spec: "国内，2.0%＜Li＜2.8%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "LFP=磷酸铁锂归一；电池粉与Li区间2.0%-2.8%一致",
       series: [{ category: 废旧锂电黑粉价格, product_name: 磷酸铁锂电池粉, specification: "2.0%<Li<2.8%" }],
       keywords: [LFP电池粉, 磷酸铁锂电池粉, 电池粉, 黑粉] }
-  - { id: "black_ncm811_piece_powder", template_row: 15, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "black_ncm811_piece_powder", template_row: 15, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "811极片粉（国内）",
       chemistry: NCM, display_name: "811极片粉", spec: "国内", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "NCM=三元归一；811极片粉一致；排除同名系数/指数条目",
       series: [{ category: 废旧锂电黑粉价格, product_name: 三元811极片粉, specification: "811" }],
       keywords: [811极片粉, 三元811极片粉, 811, 极片粉] }
-  - { id: "black_ncm622_piece_powder", template_row: 16, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "black_ncm622_piece_powder", template_row: 16, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "622极片粉（国内）",
       chemistry: NCM, display_name: "622极片粉", spec: "国内", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "NCM=三元归一；622极片粉一致；排除同名系数/指数条目",
       series: [{ category: 废旧锂电黑粉价格, product_name: 三元622极片粉, specification: "622" }],
       keywords: [622极片粉, 三元622极片粉, 622, 极片粉] }
-  - { id: "black_ncm523_piece_powder", template_row: 17, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "black_ncm523_piece_powder", template_row: 17, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "523极片粉（国内）",
       chemistry: NCM, display_name: "523极片粉", spec: "国内", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "NCM=三元归一；523极片粉一致；排除同名系数/指数条目",
       series: [{ category: 废旧锂电黑粉价格, product_name: 三元523极片粉, specification: "523" }],
       keywords: [523极片粉, 三元523极片粉, 523, 极片粉] }
-  - { id: "black_ncm111_piece_powder", template_row: 18, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "black_ncm111_piece_powder", template_row: 18, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "111极片粉（国内）",
       chemistry: NCM, display_name: "111极片粉", spec: "国内", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "NCM=三元归一；111极片粉一致；排除同名系数/指数条目",
       series: [{ category: 废旧锂电黑粉价格, product_name: 三元111极片粉, specification: "111" }],
       keywords: [111极片粉, 三元111极片粉, 111, 极片粉] }
-  - { id: "black_ncm_cell_powder", template_row: 19, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "black_ncm_cell_powder", template_row: 19, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "NCM电池粉（国内，3%＜Li＜3.5%）",
       chemistry: NCM, display_name: "NCM电池粉", spec: "国内，3%＜Li＜3.5%", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "NCM=三元归一；电池粉与Li区间3%-3.5%一致",
       series: [{ category: 废旧锂电黑粉价格, product_name: 三元电池粉, specification: "3%<Li<3.5%" }],
       keywords: [NCM电池粉, 三元电池粉, 电池粉, 黑粉] }
   # ── 非 SMM：Benchmark 黑粉（保留原行，人工填写） ──
-  - { id: "bench_ncm_jp_kr", template_row: 20, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "bench_ncm_jp_kr", template_row: 20, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "NCM黑粉（日韩）",
       chemistry: NCM, display_name: "NCM黑粉（日韩）", spec: "", unit: 元/吨, source: Benchmark, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源；口径含电池粉与废料粉，与SMM电池粉不同，不能跨源替代", series: [] }
-  - { id: "bench_ncm_na", template_row: 21, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "bench_ncm_na", template_row: 21, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "NCM黑粉（北美）",
       chemistry: NCM, display_name: "NCM黑粉（北美）", spec: "", unit: 元/吨, source: Benchmark, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源；口径含电池粉与废料粉，与SMM电池粉不同，不能跨源替代", series: [] }
-  - { id: "bench_ncm_eu", template_row: 22, organization: 华友循环, material_attribute: 原料, info_category: 黑粉,
+  - { id: "bench_ncm_eu", template_row: 22, organization: 回收循环板块, material_attribute: 原料, info_category: 黑粉,
     template_detail: "NCM黑粉（欧洲）",
       chemistry: NCM, display_name: "NCM黑粉（欧洲）", spec: "", unit: 元/吨, source: Benchmark, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源；口径含电池粉与废料粉，与SMM电池粉不同，不能跨源替代", series: [] }
-  # ── 华友绿能：磷酸铁锂正极（6 条独立业务行；结论见 docs/smm_lfp_price_point_change_2026.md） ──
-  - { id: "lfp_power_255", template_row: 23, organization: 华友绿能, material_attribute: 产品, info_category: 正极材料,
+  # ── 正极材料板块：磷酸铁锂正极（6 条独立业务行；结论见 docs/smm_lfp_price_point_change_2026.md） ──
+  - { id: "lfp_power_255", template_row: 23, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "磷酸铁锂正极（动力型压实密度≥2.55g/cm3,80%循环保持率可实现循环次数3000-4000次左右）",
       chemistry: LFP, display_name: "磷酸铁锂正极", spec: "动力型压实密度≥2.55g/cm3，80%循环保持率可实现循环次数3000-4000次左右", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed_renamed, mapping_basis: "SMM公告2026-07-17调整2：原'动力型≥2.55'改名'压实密度≥2.55'并改定义",
@@ -183,7 +183,7 @@ products:
         { categories: [正极材料, 磷化工], product_name: 磷酸铁锂, specification: "压实密度≥2.55g/cm³", valid_from: "2026-07-22", valid_to: "2026-07-31", note: "页面显示名；磷化工为同报价重复收录" },
         { categories: [正极材料, 磷化工], product_name: 磷酸铁锂, specification: "粉体压实密度≥2.55g/cm³", valid_from: "2026-08-03", note: "页面改名后；磷化工为同报价重复收录" } ],
       keywords: [磷酸铁锂正极, 磷酸铁锂, LFP, 动力型, 压实密度, 2.55] }
-  - { id: "lfp_power_250", template_row: 24, organization: 华友绿能, material_attribute: 产品, info_category: 正极材料,
+  - { id: "lfp_power_250", template_row: 24, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "磷酸铁锂正极（动力型压实密度≥2.5g/cm3,80%循环保持率可实现循环次数3000-4000次左右）",
       chemistry: LFP, display_name: "磷酸铁锂正极", spec: "动力型压实密度≥2.5g/cm3，80%循环保持率可实现循环次数3000-4000次左右", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed_renamed, mapping_basis: "SMM公告2026-07-17调整3：原'动力型≥2.50'改名'压实密度≥2.50'并改定义",
@@ -192,7 +192,7 @@ products:
         { categories: [正极材料, 磷化工], product_name: 磷酸铁锂, specification: "压实密度≥2.50g/cm³", valid_from: "2026-07-22", valid_to: "2026-07-31", note: "页面显示名；磷化工为同报价重复收录" },
         { categories: [正极材料, 磷化工], product_name: 磷酸铁锂, specification: "粉体压实密度≥2.50g/cm³", valid_from: "2026-08-03", note: "页面改名后；磷化工为同报价重复收录" } ],
       keywords: [磷酸铁锂正极, 磷酸铁锂, LFP, 动力型, 压实密度, 2.50, 2.5] }
-  - { id: "lfp_power_240", template_row: 25, organization: 华友绿能, material_attribute: 产品, info_category: 正极材料,
+  - { id: "lfp_power_240", template_row: 25, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "磷酸铁锂正极（动力型压实密度≥2.4g/cm3，80%循环保持率可实现循环次数3000-4000次左右）",
       chemistry: LFP, display_name: "磷酸铁锂正极", spec: "动力型压实密度≥2.4g/cm3，80%循环保持率可实现循环次数3000-4000次左右", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed_renamed, mapping_basis: "SMM公告2026-07-17调整4：原'动力型≥2.40'改名'压实密度≥2.40'并改定义",
@@ -201,21 +201,21 @@ products:
         { categories: [正极材料, 磷化工], product_name: 磷酸铁锂, specification: "压实密度≥2.40g/cm³", valid_from: "2026-07-22", valid_to: "2026-07-31", note: "页面显示名；磷化工为同报价重复收录" },
         { categories: [正极材料, 磷化工], product_name: 磷酸铁锂, specification: "粉体压实密度≥2.40g/cm³", valid_from: "2026-08-03", note: "页面改名后；磷化工为同报价重复收录" } ],
       keywords: [磷酸铁锂正极, 磷酸铁锂, LFP, 动力型, 压实密度, 2.40, 2.4] }
-  - { id: "lfp_ess_250", template_row: 26, organization: 华友绿能, material_attribute: 产品, info_category: 正极材料,
+  - { id: "lfp_ess_250", template_row: 26, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "磷酸铁锂正极（储能型压实密度≥2.5g/cm3，80%循环保持率可实现循环次数8000-11000次左右）",
       chemistry: LFP, display_name: "磷酸铁锂正极", spec: "储能型压实密度≥2.5g/cm3，80%循环保持率可实现循环次数8000-11000次左右", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: unavailable_merged, mapping_basis: "SMM公告2026-07-17调整5：'储能型≥2.50'已并入'压实密度≥2.50'价格点，无独立报价",
       note: "暂无独立报价：SMM 2026-07-17 起将储能型≥2.50 并入压实密度≥2.50 价格点（征询函调整5）。不复制同价冒充独立采集；月报该行留空。如需参考可查看'动力型≥2.50'对应的同系列报价",
       series: [],
       keywords: [磷酸铁锂正极, 磷酸铁锂, LFP, 储能型, 压实密度, 2.50, 2.5] }
-  - { id: "lfp_ess_240", template_row: 27, organization: 华友绿能, material_attribute: 产品, info_category: 正极材料,
+  - { id: "lfp_ess_240", template_row: 27, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "磷酸铁锂正极（储能型压实密度≥2.4g/cm3，80%循环保持率可实现循环次数7000-11000次左右）",
       chemistry: LFP, display_name: "磷酸铁锂正极", spec: "储能型压实密度≥2.4g/cm3，80%循环保持率可实现循环次数7000-11000次左右", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: unavailable_merged, mapping_basis: "SMM公告2026-07-17调整6：'储能型≥2.40'已并入'压实密度≥2.40'价格点，无独立报价",
       note: "暂无独立报价：SMM 2026-07-17 起将储能型≥2.40 并入压实密度≥2.40 价格点（征询函调整6）。不复制同价冒充独立采集；月报该行留空",
       series: [],
       keywords: [磷酸铁锂正极, 磷酸铁锂, LFP, 储能型, 压实密度, 2.40, 2.4] }
-  - { id: "lfp_ess_230", template_row: 28, organization: 华友绿能, material_attribute: 产品, info_category: 正极材料,
+  - { id: "lfp_ess_230", template_row: 28, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "磷酸铁锂正极（储能型压实密度≥2.3g/cm3，80%循环保持率可实现循环次数7000-11000次左右）",
       chemistry: LFP, display_name: "磷酸铁锂正极", spec: "储能型压实密度≥2.3g/cm3，80%循环保持率可实现循环次数7000-11000次左右", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed_renamed, mapping_basis: "SMM公告2026-07-17调整7：原'储能型≥2.30'改名'压实密度≥2.30'并改定义",
@@ -224,127 +224,127 @@ products:
         { categories: [正极材料, 磷化工], product_name: 磷酸铁锂, specification: "压实密度≥2.30g/cm³", valid_from: "2026-07-22", valid_to: "2026-07-31", note: "页面显示名；磷化工为同报价重复收录" },
         { categories: [正极材料, 磷化工], product_name: 磷酸铁锂, specification: "粉体压实密度≥2.30g/cm³", valid_from: "2026-08-03", note: "页面改名后；磷化工为同报价重复收录" } ],
       keywords: [磷酸铁锂正极, 磷酸铁锂, LFP, 储能型, 压实密度, 2.30, 2.3] }
-  - { id: "lfp_repair_high", template_row: 29, organization: 华友绿能, material_attribute: 产品, info_category: 正极材料,
+  - { id: "lfp_repair_high", template_row: 29, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "修复型磷酸铁锂（高端款，压实密度≥2.55g/cm3）",
       chemistry: LFP, display_name: "修复型磷酸铁锂（高端款）", spec: "压实密度≥2.55g/cm3", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "修复型+高端款+压实密度≥2.55一致；正极材料/磷化工双分类重复收录同报价（去重只计一次）",
       series: [{ categories: [正极材料, 磷化工], product_name: "修复型磷酸铁锂(高端款)", specification: "回收修复型，压实密度不小于2.55g/cm³。" }],
       keywords: [修复型磷酸铁锂, 高端款, 修复型, LFP, 压实密度, 2.55] }
-  - { id: "lfp_repair", template_row: 30, organization: 华友绿能, material_attribute: 产品, info_category: 正极材料,
+  - { id: "lfp_repair", template_row: 30, organization: 正极材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "修复型磷酸铁锂",
       chemistry: LFP, display_name: "修复型磷酸铁锂", spec: "", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称一致；正极材料/磷化工双分类重复收录同报价（去重只计一次）",
       series: [{ categories: [正极材料, 磷化工], product_name: 修复型磷酸铁锂, specification: "回收修复型" }],
       keywords: [修复型磷酸铁锂, 修复型, LFP] }
-  # ── 华友能源：新电芯（周报价） ──
-  - { id: "cell_ncm523_50_60ah", template_row: 31, organization: 华友能源, material_attribute: 原料, info_category: 新电芯,
+  # ── 电芯电池板块：新电芯（周报价） ──
+  - { id: "cell_ncm523_50_60ah", template_row: 31, organization: 电芯电池板块, material_attribute: 原料, info_category: 新电芯,
     template_detail: "新 523方形三元电芯（50-60Ah)",
       chemistry: NCM, display_name: "新 523方形三元电芯", spec: "50-60Ah", unit: "元 /Wh", source: SMM, frequency: weekly,
       mapping_status: confirmed, mapping_basis: "名称+容量一致；源产品名含'(周)'明确为周报价",
       series: [{ category: 电芯, product_name: "523方形三元电芯(周）", specification: "50-60Ah" }],
       keywords: [523方形三元电芯, 三元电芯, 523, 50-60Ah, 电芯] }
-  - { id: "cell_ncm6_114ah", template_row: 32, organization: 华友能源, material_attribute: 原料, info_category: 新电芯,
+  - { id: "cell_ncm6_114ah", template_row: 32, organization: 电芯电池板块, material_attribute: 原料, info_category: 新电芯,
     template_detail: "新 6系方形三元电芯（114Ah)",
       chemistry: NCM, display_name: "新 6系方形三元电芯", spec: "114Ah", unit: "元 /Wh", source: SMM, frequency: weekly,
       mapping_status: confirmed, mapping_basis: "名称+容量一致；源产品名含'(周)'明确为周报价",
       series: [{ category: 电芯, product_name: "6系方形三元电芯(周)", specification: "114Ah" }],
       keywords: [6系方形三元电芯, 三元电芯, 6系, 114Ah, 电芯] }
-  - { id: "cell_ncm8_158ah", template_row: 33, organization: 华友能源, material_attribute: 原料, info_category: 新电芯,
+  - { id: "cell_ncm8_158ah", template_row: 33, organization: 电芯电池板块, material_attribute: 原料, info_category: 新电芯,
     template_detail: "新 8系方形三元电芯（158Ah)",
       chemistry: NCM, display_name: "新 8系方形三元电芯", spec: "158Ah", unit: "元 /Wh", source: SMM, frequency: weekly,
       mapping_status: confirmed, mapping_basis: "名称+容量一致；源产品名含'(周)'明确为周报价",
       series: [{ category: 电芯, product_name: "8系方形三元电芯(周)", specification: "158Ah" }],
       keywords: [8系方形三元电芯, 三元电芯, 8系, 158Ah, 电芯] }
-  - { id: "cell_lfp_47_7ah", template_row: 34, organization: 华友能源, material_attribute: 原料, info_category: 新电芯,
+  - { id: "cell_lfp_47_7ah", template_row: 34, organization: 电芯电池板块, material_attribute: 原料, info_category: 新电芯,
     template_detail: "新 方形LFP电芯（47.7Ah）",
       chemistry: LFP, display_name: "新 方形LFP电芯", spec: "47.7Ah", unit: "元 /Wh", source: SMM, frequency: weekly,
       mapping_status: confirmed, mapping_basis: "LFP=磷酸铁锂归一；名称+容量一致；源产品名含'(周)'明确为周报价",
       series: [{ category: 电芯, product_name: "方形磷酸铁锂电芯(周)", specification: "47.7Ah" }],
       keywords: [方形LFP电芯, 方形磷酸铁锂电芯, LFP电芯, 47.7Ah, 电芯] }
-  - { id: "cell_lfp_100ah", template_row: 35, organization: 华友能源, material_attribute: 原料, info_category: 新电芯,
+  - { id: "cell_lfp_100ah", template_row: 35, organization: 电芯电池板块, material_attribute: 原料, info_category: 新电芯,
     template_detail: "新 方形LFP电芯（100Ah）",
       chemistry: LFP, display_name: "新 方形LFP电芯", spec: "100Ah", unit: "元 /Wh", source: SMM, frequency: weekly,
       mapping_status: confirmed, mapping_basis: "名称+容量一致；电芯/磷化工双分类重复收录同报价（去重只计一次）；储能电芯类'方形磷酸铁锂电池(周)'为不同产品名不混用",
       series: [{ categories: [电芯, 磷化工], product_name: "方形磷酸铁锂电芯(周)", specification: "100Ah" }],
       keywords: [方形LFP电芯, 方形磷酸铁锂电芯, LFP电芯, 100Ah, 电芯] }
-  - { id: "cell_lfp_174ah", template_row: 36, organization: 华友能源, material_attribute: 原料, info_category: 新电芯,
+  - { id: "cell_lfp_174ah", template_row: 36, organization: 电芯电池板块, material_attribute: 原料, info_category: 新电芯,
     template_detail: "新 方形LFP电芯（174Ah）",
       chemistry: LFP, display_name: "新 方形LFP电芯", spec: "174Ah", unit: "元 /Wh", source: SMM, frequency: weekly,
       mapping_status: confirmed, mapping_basis: "名称+容量一致；源产品名含'(周)'明确为周报价",
       series: [{ category: 电芯, product_name: "方形磷酸铁锂电芯(周)", specification: "174Ah" }],
       keywords: [方形LFP电芯, 方形磷酸铁锂电芯, LFP电芯, 174Ah, 电芯] }
-  # ── 非 SMM：江苏华友客户反馈（保留原行，人工填写） ──
-  - { id: "feedback_ess_liquid", template_row: 37, organization: 华友能源, material_attribute: 产品, info_category: 新电池,
+  # ── 非 SMM：江苏客户反馈（保留原行，人工填写） ──
+  - { id: "feedback_ess_liquid", template_row: 37, organization: 电芯电池板块, material_attribute: 产品, info_category: 新电池,
     template_detail: "工商业储能系统每度电销售价格（液冷）",
-      chemistry: LFP, display_name: "工商业储能系统每度电销售价格（液冷）", spec: "", unit: "元 /Wh", source: 江苏华友客户反馈, frequency: "",
+      chemistry: LFP, display_name: "工商业储能系统每度电销售价格（液冷）", spec: "", unit: "元 /Wh", source: 江苏客户反馈, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源，保留原行供人工填写", series: [] }
-  - { id: "feedback_small_6020", template_row: 38, organization: 华友能源, material_attribute: 产品, info_category: 新电池,
+  - { id: "feedback_small_6020", template_row: 38, organization: 电芯电池板块, material_attribute: 产品, info_category: 新电池,
     template_detail: "小动力电池每度电市场价格（6020）",
-      chemistry: LFP, display_name: "小动力电池每度电市场价格（6020）", spec: "", unit: "元 /组", source: 江苏华友客户反馈, frequency: "",
+      chemistry: LFP, display_name: "小动力电池每度电市场价格（6020）", spec: "", unit: "元 /组", source: 江苏客户反馈, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源，保留原行供人工填写", series: [] }
-  - { id: "feedback_small_6030", template_row: 39, organization: 华友能源, material_attribute: 产品, info_category: 新电池,
+  - { id: "feedback_small_6030", template_row: 39, organization: 电芯电池板块, material_attribute: 产品, info_category: 新电池,
     template_detail: "小动力电池每度电市场价格（6030）",
-      chemistry: LFP, display_name: "小动力电池每度电市场价格（6030）", spec: "", unit: "元 /组", source: 江苏华友客户反馈, frequency: "",
+      chemistry: LFP, display_name: "小动力电池每度电市场价格（6030）", spec: "", unit: "元 /组", source: 江苏客户反馈, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源，保留原行供人工填写", series: [] }
-  - { id: "feedback_small_6050", template_row: 40, organization: 华友能源, material_attribute: 产品, info_category: 新电池,
+  - { id: "feedback_small_6050", template_row: 40, organization: 电芯电池板块, material_attribute: 产品, info_category: 新电池,
     template_detail: "小动力电池每度电市场价格（6050）",
-      chemistry: LFP, display_name: "小动力电池每度电市场价格（6050）", spec: "", unit: "元 /组", source: 江苏华友客户反馈, frequency: "",
+      chemistry: LFP, display_name: "小动力电池每度电市场价格（6050）", spec: "", unit: "元 /组", source: 江苏客户反馈, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源，保留原行供人工填写", series: [] }
-  # ── 彭博团队：三元正极材料（最新页来源 SMM；6月页同组曾标'华宝'，以最新页为准） ──
-  - { id: "ncm523_single_power", template_row: 41, organization: 彭博团队, material_attribute: 产品, info_category: 正极材料,
+  # ── 三元材料板块：三元正极材料（最新页来源 SMM；6月页同组曾标'华宝'，以最新页为准） ──
+  - { id: "ncm523_single_power", template_row: 41, organization: 三元材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "5系三元材料（单晶/动力型）",
       chemistry: NCM, display_name: "5系三元材料", spec: "单晶/动力型", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+单晶/动力型一致；排除三元前驱体",
       series: [{ category: 正极材料, product_name: 5系三元材料, specification: "单晶/动力型" }],
       keywords: [5系三元材料, 三元材料, 523, 单晶, 动力型] }
-  - { id: "ncm523_poly_consumer", template_row: 42, organization: 彭博团队, material_attribute: 产品, info_category: 正极材料,
+  - { id: "ncm523_poly_consumer", template_row: 42, organization: 三元材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "5系三元材料（多晶/消费型）",
       chemistry: NCM, display_name: "5系三元材料", spec: "多晶/消费型", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+多晶/消费型一致；排除三元前驱体",
       series: [{ category: 正极材料, product_name: 5系三元材料, specification: "多晶/消费型" }],
       keywords: [5系三元材料, 三元材料, 523, 多晶, 消费型] }
-  - { id: "ncm6_single_power", template_row: 43, organization: 彭博团队, material_attribute: 产品, info_category: 正极材料,
+  - { id: "ncm6_single_power", template_row: 43, organization: 三元材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "6系三元材料（单晶/动力型）",
       chemistry: NCM, display_name: "6系三元材料", spec: "单晶/动力型", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+单晶/动力型一致；排除三元前驱体",
       series: [{ category: 正极材料, product_name: "6系三元材料（单晶/动力型）", specification: "单晶/动力型" }],
       keywords: [6系三元材料, 三元材料, 6系, 单晶, 动力型] }
-  - { id: "ncm6_poly_consumer", template_row: 44, organization: 彭博团队, material_attribute: 产品, info_category: 正极材料,
+  - { id: "ncm6_poly_consumer", template_row: 44, organization: 三元材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "6系三元材料（多晶/消费型）",
       chemistry: NCM, display_name: "6系三元材料", spec: "多晶/消费型", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称+多晶/消费型一致；排除三元前驱体",
       series: [{ category: 正极材料, product_name: "6系三元材料（多晶/消费型）", specification: "多晶/消费型" }],
       keywords: [6系三元材料, 三元材料, 6系, 多晶, 消费型] }
-  - { id: "ncm8_poly_power", template_row: 45, organization: 彭博团队, material_attribute: 产品, info_category: 正极材料,
+  - { id: "ncm8_poly_power", template_row: 45, organization: 三元材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "8系三元材料（多晶动力型）",
       chemistry: NCM, display_name: "8系三元材料", spec: "多晶/动力型", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称一致；补齐模板省略的斜线（多晶动力型=多晶/动力型）；排除三元前驱体",
       series: [{ category: 正极材料, product_name: 8系三元材料, specification: "多晶/动力型" }],
       keywords: [8系三元材料, 三元材料, 8系, 多晶, 动力型] }
-  - { id: "ncm8_poly_consumer", template_row: 46, organization: 彭博团队, material_attribute: 产品, info_category: 正极材料,
+  - { id: "ncm8_poly_consumer", template_row: 46, organization: 三元材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "8系三元材料（多晶消费型）",
       chemistry: NCM, display_name: "8系三元材料", spec: "多晶/消费型", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称一致；补齐模板省略的斜线（多晶消费型=多晶/消费型）；排除三元前驱体",
       series: [{ category: 正极材料, product_name: 8系三元材料, specification: "多晶/消费型" }],
       keywords: [8系三元材料, 三元材料, 8系, 多晶, 消费型] }
-  - { id: "ncm9_consumer", template_row: 47, organization: 彭博团队, material_attribute: 产品, info_category: 正极材料,
+  - { id: "ncm9_consumer", template_row: 47, organization: 三元材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "9系三元材料（消费型）",
       chemistry: NCM, display_name: "9系三元材料", spec: "消费型", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称一致（全半角括号归一）；排除三元前驱体",
       series: [{ category: 正极材料, product_name: "9系三元材料(消费型)", specification: "消费型" }],
       keywords: [9系三元材料, 三元材料, 9系, 消费型] }
-  - { id: "nca", template_row: 48, organization: 彭博团队, material_attribute: 产品, info_category: 正极材料,
+  - { id: "nca", template_row: 48, organization: 三元材料板块, material_attribute: 产品, info_category: 正极材料,
     template_detail: "NCA三元材料",
       chemistry: NCM, display_name: "NCA三元材料", spec: "", unit: 元/吨, source: SMM, frequency: daily,
       mapping_status: confirmed, mapping_basis: "名称一致；源 specification 为'-'（无更细规格）",
       series: [{ category: 正极材料, product_name: NCA三元材料, specification: "-" }],
       keywords: [NCA三元材料, NCA, 三元材料] }
   # ── 非 SMM：富宝（保留原行，人工填写） ──
-  - { id: "fubao_ncm622_piece", template_row: 49, organization: 彭博团队, material_attribute: 原料, info_category: 废极片,
+  - { id: "fubao_ncm622_piece", template_row: 49, organization: 三元材料板块, material_attribute: 原料, info_category: 废极片,
     template_detail: "废旧三元正极片622",
       chemistry: NCM, display_name: "废旧三元正极片622", spec: "", unit: 元/吨, source: 富宝, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源，保留原行供人工填写", series: [] }
-  - { id: "fubao_ncm811_piece", template_row: 50, organization: 彭博团队, material_attribute: 原料, info_category: 废极片,
+  - { id: "fubao_ncm811_piece", template_row: 50, organization: 三元材料板块, material_attribute: 原料, info_category: 废极片,
     template_detail: "废旧三元正极片811",
       chemistry: NCM, display_name: "废旧三元正极片811", spec: "", unit: 元/吨, source: 富宝, frequency: "",
       mapping_status: manual, mapping_basis: "非SMM来源，保留原行供人工填写", series: [] }

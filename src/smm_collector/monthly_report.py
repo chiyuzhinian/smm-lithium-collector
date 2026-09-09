@@ -1,4 +1,4 @@
-"""华友月度业务报表 Excel 生成器（49 行主表 + 报价明细 + 计算说明）。
+"""月度业务报表 Excel 生成器（49 行主表 + 报价明细 + 计算说明）。
 
 口径（与 portal_service 一致，由服务层计算后传入，本模块只负责版式）：
   - F 列月均价 = 依据采集报价计算的月均价（非 SMM 官方月均），
@@ -23,7 +23,7 @@ from openpyxl.utils import get_column_letter
 
 from smm_collector import portal_service as ps
 
-# 模板版式（与《华友循环产业集团市场价格数据》最新页一致）
+# 模板版式（与《市场价格数据模板》最新页一致）
 COLUMN_WIDTHS = {"A": 10.3, "B": 9.4, "C": 10.2, "D": 9.6, "E": 36.6,
                  "F": 18.6, "G": 8.4, "H": 17.7, "I": 21.9, "J": 19.7, "K": 38.5}
 PREDICTION_MERGES = ["I23:I25", "I41:I42", "I43:I44", "I45:I46"]
@@ -276,4 +276,4 @@ def build_monthly_report_xlsx(products: list[dict], con: sqlite3.Connection, mon
 
 
 def report_filename(month: str) -> str:
-    return f"华友月度业务报表_{month}.xlsx"
+    return f"月度业务报表_{month}.xlsx"
