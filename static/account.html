@@ -3,40 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>账号安全 - 锂电价格与回收业务数据中心</title>
-<link rel="stylesheet" href="/static/css/style.css">
+<title>账号安全 · 华友锂电行情数据中心</title>
+<link rel="stylesheet" href="/static/css/app.css?v=4">
 </head>
 <body data-page="account">
 <div id="navbar"></div>
 
-<div class="main-container narrow">
-  <section class="section">
-    <div class="section-title">账号安全</div>
-    <div id="must-change-banner" class="notice notice-warn" hidden>
+<div class="main-container" style="max-width:720px">
+  <div class="page-head">
+    <h1 class="page-title">账号安全</h1>
+  </div>
+  <div class="panel" style="padding:22px 26px">
+    <div id="must-change-banner" class="detail-note" style="margin-bottom:14px" hidden>
       ⚠️ 当前使用初始化密码，请立即修改后才能使用数据门户。
     </div>
-    <div class="account-card">
-      <p>当前账号：<strong id="acc-username">—</strong>（<span id="acc-role">—</span>）</p>
-      <form id="pwd-form">
-        <label for="pwd-current">当前密码</label>
-        <input id="pwd-current" type="password" autocomplete="current-password" required>
-        <label for="pwd-new">新密码（至少 8 位）</label>
-        <input id="pwd-new" type="password" autocomplete="new-password" required minlength="8">
-        <label for="pwd-confirm">确认新密码</label>
-        <input id="pwd-confirm" type="password" autocomplete="new-password" required minlength="8">
-        <div class="login-error" id="pwd-error" hidden></div>
-        <button type="submit" class="btn btn-primary">修改密码</button>
-        <p class="form-hint">修改成功后所有已登录会话将失效，需重新登录。</p>
-      </form>
+    <div style="font-size:13.5px;color:var(--ink-2);margin-bottom:18px">
+      当前账号：<strong id="acc-username">—</strong>（<span id="acc-role">—</span>）
     </div>
-  </section>
+    <form id="pwd-form">
+      <div class="auth-field">
+        <label for="pwd-current">当前密码</label>
+        <input class="auth-input" id="pwd-current" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="auth-field">
+        <label for="pwd-new">新密码（至少 8 位）</label>
+        <input class="auth-input" id="pwd-new" type="password" autocomplete="new-password" required minlength="8">
+      </div>
+      <div class="auth-field">
+        <label for="pwd-confirm">确认新密码</label>
+        <input class="auth-input" id="pwd-confirm" type="password" autocomplete="new-password" required minlength="8">
+      </div>
+      <div class="auth-error" id="pwd-error" hidden></div>
+      <button type="submit" class="auth-btn" style="width:auto;padding:0 28px">修改密码</button>
+      <p style="font-size:12px;color:var(--ink-4);margin-top:10px">修改成功后所有已登录会话将失效，需重新登录。</p>
+    </form>
+  </div>
 </div>
 
 <div id="footer"></div>
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/api.js"></script>
-<script src="/static/js/nav.js"></script>
-<script src="/static/js/account.js"></script>
+<script src="/static/js/api.js?v=4"></script>
+<script src="/static/js/common.js?v=4"></script>
+<script src="/static/js/nav.js?v=4"></script>
+<script src="/static/js/account.js?v=4"></script>
 </body>
 </html>

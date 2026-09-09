@@ -3,22 +3,41 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>数据质量 · 锂电价格与回收业务数据中心</title>
-<link rel="stylesheet" href="/static/css/style.css">
+<title>数据质量 · 华友锂电行情数据中心</title>
+<link rel="stylesheet" href="/static/css/app.css?v=4">
 </head>
 <body data-page="quality">
 <div id="navbar"></div>
 
 <div class="main-container">
 
+  <div class="page-head">
+    <div class="page-head-left">
+      <h1 class="page-title">数据质量</h1>
+      <div class="page-status">
+        <span>当前质量状态与更新时间</span>
+        <span class="status-sep">·</span>
+        <span>固定汇总状态</span>
+        <span class="status-sep">·</span>
+        <span>近 14 日明细</span>
+        <span class="status-sep">·</span>
+        <span>数据缺口清单</span>
+      </div>
+    </div>
+  </div>
+
   <section class="section">
-    <div class="section-title">数据质量面板</div>
-    <div class="quality-today" id="quality-today"></div>
+    <div class="section-title">当前质量状态</div>
+    <div class="quality-today" id="quality-today">
+      <div class="loading"><span class="spinner"></span>正在加载数据质量…</div>
+    </div>
   </section>
 
   <section class="section">
     <div class="section-title">固定汇总状态</div>
-    <div class="quality-fixed" id="quality-fixed"></div>
+    <div class="quality-fixed" id="quality-fixed">
+      <div class="loading"><span class="spinner"></span>正在加载固定汇总状态…</div>
+    </div>
   </section>
 
   <section class="section">
@@ -37,7 +56,9 @@
 
   <section class="section">
     <div class="section-title">数据缺口清单</div>
-    <div class="gaps-list" id="gaps-list"></div>
+    <div class="gaps-list" id="gaps-list">
+      <div class="loading"><span class="spinner"></span>正在加载缺口清单…</div>
+    </div>
   </section>
 
 </div>
@@ -45,10 +66,10 @@
 <div id="footer"></div>
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/echarts.min.js"></script>
-<script src="/static/js/api.js"></script>
-<script src="/static/js/charts.js"></script>
-<script src="/static/js/nav.js"></script>
-<script src="/static/js/quality.js"></script>
+<script src="/static/js/echarts.min.js?v=4"></script>
+<script src="/static/js/api.js?v=4"></script>
+<script src="/static/js/common.js?v=4"></script>
+<script src="/static/js/nav.js?v=4"></script>
+<script src="/static/js/quality.js?v=4"></script>
 </body>
 </html>

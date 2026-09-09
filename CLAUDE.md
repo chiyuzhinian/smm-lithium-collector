@@ -31,7 +31,8 @@
 | 门户账号 | huayou（普通）/ admin（管理员），库 `/var/lib/smm-fileserver/auth.db`（PBKDF2-SHA256，0600，Web 不可达） |
 | 钉钉 | 已配置（每日采集完成后推送日报 + Excel 下载链接） |
 | Git 分支 | ⚠️ 服务器部署于 **feature/auth-admin-dashboard**（领先 origin/main **7 个提交**），生产 = 此分支，勿在 main 上操作 |
-| 测试 | **226 passed**（pytest 22.6s） |
+| 测试 | **249 passed**（pytest 24.3s；含 portal_service/monthly_report 23 个新测试） |
+| 门户重构 | ✅ 2026-09-06 完成「业务品种映射 + 每日报价/价格走势/数据与报表」重构并**已部署生产（19:58）**；当晚 **V3 深色视觉专项重构已部署**（墨蓝石墨行情工作台，规范 `docs/portal-visual-spec-v3.md`）；**2026-09-07 V4 回归修复已部署**（趋势页去明细表+摘要行、报表双 Tab 互斥、质量/运维深色统一、202 项浏览器断言全过）；8899 预览指向 repo static/，见 `DEPLOYMENT_STATUS_2026-09-06.md` §七/§八 |
 
 ### 文档现状（哪些可信）
 
@@ -70,7 +71,10 @@
 │   ├── selectors.yaml           # SMM 页面选择器（section 模式，分类名选择器已确认）
 │   ├── categories_portal.yaml   # 门户与门控统一配置：40 规范分类/A-F分组/12指标卡/
 │   │                            #   20重点产品(db三元组)/4专题/账号阈值/健康阈值/日志白名单
-│   └── business_report_mapping.yaml  # 规范日报(11列)材料映射（华友循环/华友绿能）
+│   ├── business_products.yaml   # ⭐ 业务品种→DB报价系列映射（49行：40 SMM + 9 非SMM）
+│   │                            #   稳定ID/组织/属性/类别/精确三元组/别名/映射状态与依据
+│   │                            #   首页/走势/月报共用（2026-09-06 门户重构核心）
+│   └── business_report_mapping.yaml  # 规范日报(11列)材料映射（旧口径，重构后仅供参考）
 │
 ├── src/smm_collector/           # 核心包
 │   ├── main.py                  # collect() 全流程编排 + cli()
@@ -88,11 +92,15 @@
 │   ├── mysql_database.py / synchronizer.py  # MySQL 建表/批量 upsert/重试/同步编排
 │   ├── notifier.py              # 钉钉日报推送
 │   ├── web_auth.py              # 门户账号/Session/CSRF/防爆破（标准库 PBKDF2）
+│   ├── portal_service.py        # ⭐ 业务品种数据服务层（每日报价/走势/月报共用）：
+│   │                            #   as_of 查询、跨分类去重、改名对合并、月均价+完整性+环比
+│   ├── monthly_report.py        # ⭐ 华友月度业务报表 Excel（49行主表+报价明细+计算说明）
 │   ├── ops_monitor.py           # 管理员运维中心聚合（/proc + 既有产物，零新数据）
 │   ├── ops_events.py            # 运维事件写入 auth.db（采集器与 Web 共用）
 │   └── logger.py                # 双文件日志（全量 + 仅错误）+ 控制台
 │
 ├── scripts/
+│   ├── build_monthly_report.py  # ⭐ 月度业务报表 CLI（--month 2026-08 → data/exports/月度业务报表/）
 │   ├── run_daily.py             # 每日采集入口（调 main.cli）
 │   ├── run_daily.sh             # cron 包装：venv 检查 + flock 互斥锁
 │   ├── catchup_daily.sh         # 兜底补采（9:30 + @reboot）：查 collection_runs，今日未 success 才采集
@@ -115,8 +123,10 @@
 │   ├── probe_api.py / probe_hq.py / probe_hq2.py / extract_mapping.py  # hq.smm.cn 探测工具
 │   └── *.bat / *.ps1 / *.vbs    # Windows 时代遗留（服务器上不用）
 │
-├── static/                      # 门户前端：index/today/history/topics/quality/admin/
-│   │                            #   login/register/account/403.html + js/ + css/
+├── static/                      # 门户前端（2026-09-06 重构）：
+│   │                            #   index=每日报价 / trends=价格走势 / reports=数据与报表
+│   │                            #   （旧）today/history/topics/quality/admin + login/register/account/403
+│   │                            #   css/app.css=新设计系统；js/common/quotes/trends/reports.js=新版逻辑
 ├── tests/                       # 226 个测试（fixtures 不依赖真实网络）
 ├── data/                        # gitignore
 │   ├── auth/                    # storage_state.json（合并了锂电+基础金属登录态）
@@ -232,10 +242,19 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 
 ### 数据门户（8888）
 
-- 页面：`/`(首页:指标卡+重点产品20卡) `/today` `/history` `/topics`(回收链重点) `/quality`
-  `/admin`(运维中心，仅 admin) `/login` `/register` `/account` `/403`
+- 页面（重构版 2026-09-06 已部署；V3 深色工作台 2026-09-06 晚已部署）：
+  - **`/` 每日报价**：40 条 SMM 业务品种，产品搜索（业务名/SMM名/缩写）+组织/类别筛选
+    +as_of 日期查询（不含未来报价）；最低/最高/日均价(突出)/涨跌(±号,涨红跌绿)/单位/
+    报价日期/采集更新时间；展开详情含完整业务规格+SMM 原始三元组+映射依据+口径说明
+  - **`/trends` 价格走势**：单产品区间带(min-max)+指标曲线(日均价/最低/最高可切换)；
+    同单位≤5 产品对比（统一日期窗口，缺报断点不补0）；图表与明细联动；7天/1月/自定义
+  - **`/reports` 数据与报表**：①全部分类数据（分类/产品/日期/关键词+分页，动态分类）
+    ②月度业务报表（选月预览 49 行 + 月均价/环比/完整性/说明 + Excel 下载）
+  - （旧）`/today` `/history` `/topics` 保留可访问，不在主导航
+  - `/quality` `/admin`（仅 admin） `/login` `/register` `/account` `/403`
 - API：`/api/latest` `/api/overview` `/api/categories` `/api/files` `/api/history` `/api/trends`
   `/api/stats` `/api/topics` `/api/quality` `/api/key-products[/history]`
+  **`/api/portal/*`**(products/quotes/history/monthly/monthly/download/dataset/*，登录即可)
   `/api/auth/*`(login/logout/me/csrf/register/change-password)
   `/api/admin/*`(overview/users/logs/tasks/events/errors/data-quality/audit)
   `/health`
@@ -291,7 +310,7 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 | ✅ 每日 manifest | 无条件生成，含缺失分类/对齐率/门控决策 |
 | ✅ MySQL 同步 | 3 表 + record_hash 去重 + 3 次重试 + 按校准日期同步 |
 | ✅ 钉钉日报 | 摘要 + Excel 下载链接 |
-| ✅ 数据门户 | 8888：首页(重点产品 20 卡/7d+30d 真实趋势)/今日/历史/专题/质量/运维中心 |
+| ✅ 门户重构(已部署) | 业务品种映射(49行)+每日报价+价格走势+数据与报表+月度业务报表 Excel |
 | ✅ 门户账号体系 | 表单登录+Session+CSRF+防爆破+注册(强制 user)+管理员用户管理 |
 | ✅ 运维中心 | 系统资源/采集任务/验证结果/事件/错误日志查看 |
 | ✅ 业务报告 | 规范日报（11 列，映射配置）+ 领导汇报 + 市场价格报表 |
@@ -320,6 +339,8 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 | ⚠️ 文档 | README.md / RUN_GUIDE.md 过时（Windows/ngrok 时代） |
 | ⚠️ pandas FutureWarning | 空 DataFrame concat 行为将变化（exporter.py:185） |
 | ⚠️ 1 行 price_date 为空 | 历史脏数据（12661 行中 1 行） |
+| ~~门户重构未部署~~ | ✅ 已解决：2026-09-06 19:58 部署生产（`systemctl restart smm-fileserver`），8888 = 新版；8899 预览保留供开发用 |
+| ⚠️ LFP 储能型≥2.50/2.40 | SMM 官方已并入密度价格点，无独立报价；门户显示口径说明、月报留空（业务确认前维持现状） |
 | ❌ 邮件通知 | 未实现（钉钉已替代） |
 
 ## 12. 维护注意（踩坑清单）

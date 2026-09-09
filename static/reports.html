@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据与报表 · 华友锂电行情数据中心</title>
+<link rel="stylesheet" href="/static/css/app.css?v=4">
+</head>
+<body data-page="reports">
+<div id="navbar"></div>
+
+<div class="main-container">
+
+  <!-- 页头 -->
+  <div class="page-head">
+    <div class="page-head-left">
+      <h1 class="page-title">数据与报表</h1>
+      <div class="page-status">
+        <span>全部分类数据检索</span>
+        <span class="status-sep">·</span>
+        <span>月度业务报表生成与下载</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 子页标签（两个视图严格互斥：[hidden] 全局生效） -->
+  <div class="seg" style="margin-bottom:10px;align-self:flex-start" id="tab-seg">
+    <button class="active" data-tab="dataset">全部分类数据</button>
+    <button data-tab="monthly">月度业务报表</button>
+  </div>
+
+  <!-- ============ 子页 1：全部分类数据（仅此视图内容，月报内容不显示不占位） ============ -->
+  <section id="tab-dataset">
+    <div class="filter-bar">
+      <div class="field">
+        <label for="ds-cat">分类</label>
+        <select class="ctl" id="ds-cat" style="width:170px"><option value="">全部分类</option></select>
+      </div>
+      <div class="field search-field" style="flex:1 1 220px;max-width:340px">
+        <label for="ds-prod">产品</label>
+        <select class="ctl" id="ds-prod" style="flex:1;min-width:0"><option value="">全部产品</option></select>
+      </div>
+      <div class="field">
+        <label>日期范围</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="ctl" type="date" id="ds-from">
+          <span style="color:var(--ink-3)">—</span>
+          <input class="ctl" type="date" id="ds-to">
+        </div>
+      </div>
+      <div class="field">
+        <label for="ds-q">关键词</label>
+        <input class="ctl" id="ds-q" type="text" placeholder="产品 / 规格 / 分类" style="width:150px">
+      </div>
+      <div class="btn-group">
+        <button class="btn primary" id="ds-search">查询</button>
+        <button class="btn ghost" id="ds-reset">重置</button>
+      </div>
+      <div class="result-count" id="ds-count">—</div>
+    </div>
+
+    <!-- 表格主体：页面正常纵向滚动，分页紧邻表格底部 -->
+    <div class="panel">
+      <div class="table-scroll" id="ds-scroll">
+        <div class="loading"><span class="spinner"></span>正在加载全部分类数据…</div>
+      </div>
+      <div class="pager-bar">
+        <button class="btn sm" id="ds-prev" disabled>← 上一页</button>
+        <span class="pager-info" id="ds-page-info">—</span>
+        <button class="btn sm" id="ds-next" disabled>下一页 →</button>
+        <span class="flex-1"></span>
+        <a class="btn sm" href="/SMM锂电现货价格_历史汇总.xlsx">历史汇总 xlsx</a>
+        <a class="btn sm" href="/固定汇总/SMM锂电现货价格_固定汇总.xlsx">固定汇总 xlsx</a>
+        <a class="btn sm" href="/history">历史归档文件 →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 子页 2：月度业务报表（分类表格在此完全退出布局） ============ -->
+  <section id="tab-monthly" hidden>
+    <div class="filter-bar">
+      <div class="field">
+        <label for="month-input">报表月份</label>
+        <input class="ctl" type="month" id="month-input" title="自然月">
+      </div>
+      <div class="btn-group">
+        <button class="btn primary" id="month-load">预览</button>
+        <button class="btn" id="month-download">下载 Excel</button>
+      </div>
+      <div class="result-count" id="month-count">—</div>
+    </div>
+
+    <!-- 汇总条（预览成功后显示） -->
+    <div class="data-status" id="month-status" hidden></div>
+
+    <!-- 计算说明（可展开） -->
+    <details class="caliber-box" id="method-panel">
+      <summary>计算说明</summary>
+      <div class="caliber-body" id="method-body"></div>
+    </details>
+
+    <!-- 预览主体：未预览=紧凑提示 / 加载=spinner / 成功=表格 / 无数据/失败=明确状态+重试 -->
+    <div class="panel">
+      <div id="month-scroll">
+        <div class="quality-state">选择月份后预览。月份默认取上一个自然月。</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div id="footer"></div>
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/echarts.min.js?v=4"></script>
+<script src="/static/js/api.js?v=4"></script>
+<script src="/static/js/common.js?v=4"></script>
+<script src="/static/js/nav.js?v=4"></script>
+<script src="/static/js/reports.js?v=4"></script>
+</body>
+</html>

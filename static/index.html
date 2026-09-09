@@ -3,68 +3,76 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>锂电价格与回收业务数据中心</title>
-<link rel="stylesheet" href="/static/css/style.css?v=20260819">
+<title>每日报价 · 华友锂电行情数据中心</title>
+<link rel="stylesheet" href="/static/css/app.css?v=4">
 </head>
-<body data-page="home">
+<body data-page="quotes">
 <div id="navbar"></div>
 
 <div class="main-container">
 
-  <!-- Banner -->
-  <section class="banner">
-    <h1>锂电价格与回收业务数据中心</h1>
-    <p class="banner-desc">聚焦锂电价格、材料价格、基础金属与回收链价格数据，支持每日下载、历史归档与业务分析。</p>
-    <div class="banner-chart">
-      <svg viewBox="0 0 200 60">
-        <polyline fill="none" stroke="white" stroke-width="1.5"
-          points="0,45 20,35 40,38 60,20 80,25 100,10 120,15 140,5 160,12 180,3 200,8"/>
-        <polyline fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1"
-          points="0,50 20,42 40,48 60,30 80,35 100,20 120,28 140,15 160,22 180,12 200,18"/>
-      </svg>
-    </div>
-  </section>
-
-  <!-- 今日必看（第一优先级） -->
-  <section class="section" id="today">
-    <div class="section-title">🔴 今日必看</div>
-    <div class="today-card" id="today-card">
-      <div class="empty-state"><div class="empty-icon">⏳</div><div>加载中…</div></div>
-    </div>
-  </section>
-
-  <!-- 重点产品价格（首页核心模块：全部数据来自数据库真实记录） -->
-  <section class="section">
-    <div class="section-title">重点产品价格 <span class="section-note">最新价 · 较上次变化 · 近7日真实趋势 · 数据日期/更新时间</span></div>
-    <div class="kp-toolbar">
-      <div class="kp-tabs" id="kp-tabs">
-        <button class="kp-tab active" data-tab="all">全部</button>
-        <button class="kp-tab" data-tab="回收">回收</button>
-        <button class="kp-tab" data-tab="正极材料">正极材料</button>
+  <!-- 页头：标题 + 紧凑状态行 + 操作，同一水平区域 -->
+  <div class="page-head">
+    <div class="page-head-left">
+      <h1 class="page-title">每日报价</h1>
+      <div class="page-status">
+        <span><span class="status-dot"></span>最新报价日期 <b class="num" id="st-latest">—</b></span>
+        <span class="status-sep">·</span>
+        <span>采集更新 <b class="num" id="st-collected">—</b></span>
+        <span class="status-sep">·</span>
+        <span>品种数 <b class="num" id="st-count">—</b></span>
+        <span class="status-sep">·</span>
+        <span>查询范围 <b class="num" id="st-range">—</b> 起</span>
       </div>
-      <input id="kp-search" type="search" placeholder="搜索产品名称 / 规格…">
     </div>
-    <div class="kp-body" id="kp-body">
-      <div class="empty-state"><div class="empty-icon">⏳</div><div>加载中…</div></div>
+    <div class="page-actions">
+      <a class="btn sm" href="/trends" id="btn-trends">价格走势 →</a>
     </div>
-  </section>
+  </div>
 
-  <!-- 业务专题入口 -->
-  <section class="section">
-    <div class="section-title">业务专题</div>
-    <div class="topic-grid" id="topic-grid"></div>
-  </section>
+  <!-- 筛选栏（标签与控件同行） -->
+  <div class="filter-bar">
+    <div class="field search-field">
+      <label for="q-input">产品搜索</label>
+      <div class="search-wrap">
+        <input class="ctl search-input" id="q-input" type="text" autocomplete="off"
+               placeholder="业务名称 / SMM 名称 / 缩写，如：碳酸锂、LFP、523">
+        <span class="search-icon">⌕</span>
+        <div class="search-suggest" id="q-suggest"></div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="org-select">组织</label>
+      <select class="ctl" id="org-select"><option value="">全部组织</option></select>
+    </div>
+    <div class="field">
+      <label for="cat-select">业务类别</label>
+      <select class="ctl" id="cat-select"><option value="">全部类别</option></select>
+    </div>
+    <div class="field">
+      <label for="asof-input">报价日期</label>
+      <input class="ctl" type="date" id="asof-input" title="含当日及更早的最新报价">
+    </div>
+    <button class="btn" id="reset-btn">重置</button>
+    <div class="result-count" id="result-count">—</div>
+  </div>
 
-  <!-- 最近 7 天价格数据 + 固定汇总状态 -->
-  <div class="two-col">
-    <section class="section">
-      <div class="section-title">最近 7 天价格数据 <span class="section-note">按数据业务日期</span></div>
-      <div class="recent-list" id="recent-list"></div>
-    </section>
-    <section class="section">
-      <div class="section-title">固定汇总状态</div>
-      <div id="fixed-summary"></div>
-    </section>
+  <!-- 数据口径（可展开） -->
+  <details class="caliber-box">
+    <summary>数据口径与说明</summary>
+    <div class="caliber-body">
+      <div><b>日均价</b> = 对应报价日期的 SMM average_price 源字段，不在前端重算；缺值显示「—」。</div>
+      <div><b>周报价品种</b>显示实际报价日期与「周报价」标识，不伪装成每日发布。</div>
+      <div><b>涨跌</b>展示源字段 change_value 并按原单位解释；涨红跌绿，保留正负号。</div>
+      <div><b>报价日期</b>为业务报价日（as_of）：默认展示最新可用报价；选择日期后展示截至该日的报价（不含未来报价）。</div>
+    </div>
+  </details>
+
+  <!-- 价格表（固定视口，内部滚动） -->
+  <div class="panel panel-fill">
+    <div class="table-scroll" id="table-scroll">
+      <div class="loading" id="table-loading"><span class="spinner"></span>正在加载最新报价…</div>
+    </div>
   </div>
 
 </div>
@@ -72,30 +80,10 @@
 <div id="footer"></div>
 <div class="toast" id="toast"></div>
 
-<!-- 产品趋势弹窗（近7天/近30天真实价格，按需加载） -->
-<div class="modal-overlay" id="kp-modal" hidden>
-  <div class="modal" role="dialog" aria-modal="true" aria-label="产品趋势">
-    <div class="modal-head">
-      <div>
-        <div class="modal-title" id="kp-modal-title"></div>
-        <div class="modal-sub" id="kp-modal-sub"></div>
-      </div>
-      <button class="modal-close" id="kp-modal-close" aria-label="关闭">×</button>
-    </div>
-    <div class="range-toggle">
-      <button class="range-btn active" data-range="7d">近7天</button>
-      <button class="range-btn" data-range="30d">近30天</button>
-    </div>
-    <div class="chart-box" id="kp-chart" data-chart></div>
-    <div class="modal-foot" id="kp-modal-foot"></div>
-  </div>
-</div>
-
-<script src="/static/js/echarts.min.js?v=20260819"></script>
-<script src="/static/js/api.js?v=20260819"></script>
-<script src="/static/js/charts.js?v=20260819"></script>
-<script src="/static/js/nav.js?v=20260819"></script>
-<script src="/static/js/home.js?v=20260819"></script>
-<script src="/static/js/keyproducts.js?v=20260819"></script>
+<script src="/static/js/echarts.min.js?v=4"></script>
+<script src="/static/js/api.js?v=4"></script>
+<script src="/static/js/common.js?v=4"></script>
+<script src="/static/js/nav.js?v=4"></script>
+<script src="/static/js/quotes.js?v=4"></script>
 </body>
 </html>

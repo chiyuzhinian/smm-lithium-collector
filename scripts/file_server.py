@@ -50,7 +50,8 @@ except ImportError:  # 系统 python 无 PyYAML 时门户配置退化
 PORT = int(os.getenv("FILE_SERVER_PORT", "8888"))
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPORTS_ROOT = PROJECT_ROOT / "data" / "exports"
-STATIC_ROOT = PROJECT_ROOT / "static"
+# 静态目录可用环境变量覆盖（开发预览用；生产默认 static/）
+STATIC_ROOT = Path(os.getenv("FILE_SERVER_STATIC_DIR", str(PROJECT_ROOT / "static")))
 DB_PATH = PROJECT_ROOT / "data" / "database" / "smm_lithium.db"
 PORTAL_CFG = PROJECT_ROOT / "config" / "categories_portal.yaml"
 # 账号库位于 systemd StateDirectory（Web 服务树之外，无法经 8888 下载）；测试用环境变量覆盖
@@ -62,9 +63,13 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 try:
     from smm_collector import ops_monitor
+    from smm_collector import portal_service
+    from smm_collector import monthly_report
     from smm_collector.web_auth import AuthStore
 except ImportError as _import_err:  # 启动检查会拦截，fail-closed
     ops_monitor = None
+    portal_service = None
+    monthly_report = None
     AuthStore = None
     AUTH_IMPORT_ERROR = str(_import_err)
 else:
@@ -75,6 +80,8 @@ AUTH_STORE = None
 
 PAGE_MAP = {
     "/": "index.html",
+    "/trends": "trends.html",
+    "/reports": "reports.html",
     "/today": "today.html",
     "/history": "history.html",
     "/topics": "topics.html",
@@ -240,6 +247,26 @@ def _portal_config() -> dict:
         except Exception:
             return _portal_cfg_cache["data"] or {}
     return _portal_cfg_cache["data"]
+
+
+# ── 业务品种映射（config/business_products.yaml，按 mtime 缓存） ──
+
+BUSINESS_CFG = PROJECT_ROOT / "config" / "business_products.yaml"
+_business_cache = {"mtime": 0.0, "products": [], "meta": {}}
+
+
+def _business_products() -> tuple[list[dict], dict]:
+    """业务品种映射（首页/走势/月报共用同一份，与服务层同源）。"""
+    if portal_service is None:
+        return [], {}
+    try:
+        mtime = BUSINESS_CFG.stat().st_mtime
+    except OSError:
+        return [], {}
+    if _business_cache["mtime"] != mtime:
+        products, meta = portal_service.load_products(PROJECT_ROOT / "config")
+        _business_cache.update({"mtime": mtime, "products": products, "meta": meta})
+    return _business_cache["products"], _business_cache["meta"]
 
 
 def _group_map() -> dict:
@@ -1302,6 +1329,24 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_json(self._api_quality())
         elif path == "/api/topics":
             self._serve_json(self._api_topics())
+
+        # ── 业务品种 API（每日报价 / 价格走势 / 月度报表 / 全量数据；登录闸门之内） ──
+        elif path == "/api/portal/products":
+            self._api_portal_products()
+        elif path == "/api/portal/quotes":
+            self._api_portal_quotes(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/portal/history":
+            self._api_portal_history(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/portal/monthly":
+            self._api_portal_monthly(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/portal/monthly/download":
+            self._api_portal_monthly_download(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/portal/dataset/categories":
+            self._api_portal_dataset_categories()
+        elif path == "/api/portal/dataset/products":
+            self._api_portal_dataset_products(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/portal/dataset/quotes":
+            self._api_portal_dataset_quotes(parse_qs(urlsplit(self.path).query))
         elif path.startswith("/api/"):
             self._serve_json({"error": "not found"}, status=404)
 
@@ -1761,6 +1806,161 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         key = (q.get("key") or [""])[0]
         range_str = (q.get("range") or ["30d"])[0]
         return _key_product_history_payload(key, range_str)
+
+    # ── 业务品种 API 实现（数据规则全部在 smm_collector.portal_service） ──
+
+    def _portal_ready(self) -> bool:
+        return portal_service is not None
+
+    def _api_portal_products(self):
+        """GET /api/portal/products：业务品种映射全量（49 行）+ 筛选维度 + 日期范围。"""
+        products, meta = _business_products()
+        if not self._portal_ready() or not products:
+            self._serve_json({"error": "业务映射配置不可用", "meta": meta}, status=503)
+            return
+        con = _db_conn()
+        try:
+            self._serve_json(portal_service.product_meta_payload(products, meta, con))
+        finally:
+            con.close()
+
+    def _api_portal_quotes(self, q: dict):
+        """GET /api/portal/quotes：40 条 SMM 业务行最新报价（as_of 日期语义）。
+
+        as_of 为空 = 最新可用报价；指定日期 = 该日（含）之前每品种最新报价，
+        返回实际 price_date 与 collected_at，绝不出现所选日期之后的价格。
+        """
+        products, meta = _business_products()
+        as_of = (q.get("as_of") or [None])[0]
+        org = (q.get("org") or [None])[0]
+        cat = (q.get("info_category") or [None])[0]
+        kw = (q.get("q") or [None])[0]
+        if as_of and portal_service.parse_date(as_of) is None:
+            self._serve_json({"error": "as_of 格式非法（YYYY-MM-DD）"}, status=400)
+            return
+        con = _db_conn()
+        try:
+            payload = portal_service.quote_rows_payload(products, con, as_of=as_of, meta=meta)
+        finally:
+            con.close()
+        if org or cat or kw:
+            if kw:
+                match_ids = {x["id"] for x in portal_service.search_products(
+                    portal_service.smm_products(products), kw)}
+            else:
+                match_ids = None
+            payload["rows"] = [
+                r for r in payload["rows"]
+                if (not org or r["organization"] == org)
+                and (not cat or r["info_category"] == cat)
+                and (match_ids is None or r["id"] in match_ids)]
+        payload["meta"]["filters"] = {"org": org, "info_category": cat, "q": kw}
+        self._serve_json(payload)
+
+    def _api_portal_history(self, q: dict):
+        """GET /api/portal/history?ids=a,b&from=&to=：统一日期窗口内的品种序列。"""
+        products, meta = _business_products()
+        ids = [i.strip() for i in (q.get("ids") or [""])[0].split(",") if i.strip()]
+        date_from = (q.get("from") or [None])[0]
+        date_to = (q.get("to") or [None])[0]
+        con = _db_conn()
+        try:
+            self._serve_json(portal_service.history_payload(
+                products, con, ids, date_from=date_from, date_to=date_to, meta=meta))
+        finally:
+            con.close()
+
+    def _api_portal_monthly(self, q: dict):
+        """GET /api/portal/monthly?month=YYYY-MM：月度业务报表预览（49 行）。"""
+        products, meta = _business_products()
+        month = (q.get("month") or [None])[0]
+        if not month or portal_service.month_bounds(month) is None:
+            self._serve_json({"error": "月份格式非法（应为 YYYY-MM）"}, status=400)
+            return
+        con = _db_conn()
+        try:
+            self._serve_json(portal_service.monthly_payload(products, con, month, meta))
+        finally:
+            con.close()
+
+    def _api_portal_monthly_download(self, q: dict):
+        """GET /api/portal/monthly/download?month=YYYY-MM：月度业务报表 xlsx 下载。
+
+        内存生成（systemd ProtectSystem=strict 只读运行下也可用），不落盘、不覆盖任何历史文件。
+        """
+        products, meta = _business_products()
+        month = (q.get("month") or [None])[0]
+        if not month or portal_service.month_bounds(month) is None:
+            self._serve_json({"error": "月份格式非法（应为 YYYY-MM）"}, status=400)
+            return
+        if monthly_report is None:
+            self._serve_json({"error": "报表模块不可用"}, status=503)
+            return
+        try:
+            con = _db_conn()
+            try:
+                buf = monthly_report.build_monthly_report_xlsx(products, con, month, meta)
+            finally:
+                con.close()
+        except ValueError as e:
+            self._serve_json({"error": str(e)}, status=400)
+            return
+        body = buf.getvalue()
+        self.send_response(200)
+        self.send_header("Content-Type",
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.send_header("Content-Disposition",
+                         f"attachment; filename*=UTF-8''{quote(monthly_report.report_filename(month))}")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _api_portal_dataset_categories(self):
+        """GET /api/portal/dataset/categories：全部采集分类（按 DB 实际数据动态生成）。"""
+        con = _db_conn()
+        try:
+            cats = portal_service.dataset_categories(con)
+        finally:
+            con.close()
+        self._serve_json({"meta": {"generated_at": datetime.now().isoformat(timespec="seconds"),
+                                   "source": "sqlite"},
+                          "categories": cats})
+
+    def _api_portal_dataset_products(self, q: dict):
+        """GET /api/portal/dataset/products?category=：分类下产品清单（下拉）。"""
+        category = (q.get("category") or [None])[0]
+        con = _db_conn()
+        try:
+            prods = portal_service.dataset_products(con, category)
+        finally:
+            con.close()
+        self._serve_json({"meta": {"generated_at": datetime.now().isoformat(timespec="seconds"),
+                                   "source": "sqlite"},
+                          "products": prods})
+
+    def _api_portal_dataset_quotes(self, q: dict):
+        """GET /api/portal/dataset/quotes：全量原始行分页（全部分类入口，不受 40 条业务限制）。"""
+        category = (q.get("category") or [None])[0]
+        product = (q.get("product") or [None])[0]
+        kw = (q.get("q") or [None])[0]
+        date_from = (q.get("from") or [None])[0]
+        date_to = (q.get("to") or [None])[0]
+        try:
+            page = max(1, int((q.get("page") or ["1"])[0]))
+            page_size = min(200, max(1, int((q.get("page_size") or ["100"])[0])))
+        except ValueError:
+            page, page_size = 1, 100
+        con = _db_conn()
+        try:
+            payload = portal_service.dataset_quotes(
+                con, category=category, product=product, q=kw,
+                date_from=date_from, date_to=date_to, page=page, page_size=page_size)
+        finally:
+            con.close()
+        payload["meta"] = {"generated_at": datetime.now().isoformat(timespec="seconds"),
+                           "source": "sqlite"}
+        self._serve_json(payload)
 
     def _api_quality(self) -> dict:
         manifests = _all_manifests()

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>价格走势 · 华友锂电行情数据中心</title>
+<link rel="stylesheet" href="/static/css/app.css?v=4">
+</head>
+<body data-page="trends">
+<div id="navbar"></div>
+
+<div class="main-container">
+
+  <!-- 页头：紧凑标题与操作 -->
+  <div class="page-head">
+    <div class="page-head-left">
+      <h1 class="page-title">价格走势</h1>
+      <div class="page-status">
+        <span>40 个业务品种共用同一报价系列绑定</span>
+        <span class="status-sep">·</span>
+        <span>真实时间轴：缺报不补点、不插值</span>
+      </div>
+    </div>
+    <div class="page-actions">
+      <a class="btn sm" href="/">← 每日报价</a>
+    </div>
+  </div>
+
+  <!-- 分析工具栏：产品 / 时间范围 / 起止日期 / 指标，可换行 -->
+  <div class="filter-bar">
+    <div class="field search-field">
+      <label for="product-pick">产品</label>
+      <div class="search-wrap">
+        <input class="ctl search-input" id="product-pick" type="text" autocomplete="off"
+               placeholder="搜索并选择产品（最多 5 个，仅限同单位），如：碳酸锂、三元材料、100Ah">
+        <span class="search-icon">⌕</span>
+        <div class="search-suggest" id="product-suggest"></div>
+      </div>
+    </div>
+    <div class="field">
+      <label>时间范围</label>
+      <div class="seg" id="range-seg">
+        <button data-range="7d">近7天</button>
+        <button data-range="1m">近1个月</button>
+        <button data-range="custom">自定义</button>
+      </div>
+    </div>
+    <div class="field" id="custom-range" hidden>
+      <label>起止日期</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input class="ctl" type="date" id="from-input">
+        <span style="color:var(--ink-3)">—</span>
+        <input class="ctl" type="date" id="to-input">
+      </div>
+    </div>
+    <div class="field">
+      <label>指标</label>
+      <div class="seg" id="metric-seg">
+        <button data-metric="avg" class="active">日均价</button>
+        <button data-metric="min">最低价</button>
+        <button data-metric="max">最高价</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 图表：头部 = 指标/单位/时间范围 + 图例 + 单品种摘要行 -->
+  <div class="panel chart-panel">
+    <div class="chart-head">
+      <div class="chart-title-line">
+        <span class="chart-metric" id="chart-metric-label">日均价</span>
+        <span class="chart-sub" id="chart-range-label">—</span>
+      </div>
+      <div class="chart-legend" id="chips-row"></div>
+    </div>
+    <div class="chart-summary" id="chart-summary"></div>
+    <div id="chart" class="chart-box"></div>
+  </div>
+
+  <!-- 数据口径（可展开） -->
+  <details class="caliber-box" style="margin-top:8px">
+    <summary>数据口径与说明</summary>
+    <div class="caliber-body">
+      <div><b>区间带</b>为同报价日期「最低—最高价」，非置信区间；曲线为所选指标（日均价/最低价/最高价）。</div>
+      <div><b>真实时间轴</b>：缺报日期不补点、不插值、不填 0；周报价品种按实际发布报价点绘制。</div>
+      <div><b>区间变化</b> = 所选区间内首、末有效报价的差值（按实际报价日期，非源字段当日涨跌）；数据不足时显示「—」。</div>
+      <div><b>对比约束</b>：不同单位的产品不会出现在同一坐标轴（最多同时 5 个）。</div>
+      <div><b>Tooltip</b> 展示完整报价日期（YYYY-MM-DD）与同一条采集记录的最低/最高/日均价与涨跌。</div>
+    </div>
+  </details>
+
+</div>
+
+<div id="footer"></div>
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/echarts.min.js?v=4"></script>
+<script src="/static/js/api.js?v=4"></script>
+<script src="/static/js/common.js?v=4"></script>
+<script src="/static/js/nav.js?v=4"></script>
+<script src="/static/js/trends.js?v=4"></script>
+</body>
+</html>

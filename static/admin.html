@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>系统运维中心 - 锂电价格与回收业务数据中心</title>
-<link rel="stylesheet" href="/static/css/style.css">
+<title>系统运维中心 · 华友锂电行情数据中心</title>
+<link rel="stylesheet" href="/static/css/app.css?v=4">
 </head>
 <body data-page="admin">
 <div id="navbar"></div>
@@ -14,13 +14,20 @@
     <div class="admin-sidebar-title">系统运维中心</div>
     <div class="admin-sidebar-sub">SMM 数据采集、数据质量与服务器运行状态监控</div>
     <ul class="admin-nav">
-      <li><a href="#overview" data-tab="overview" class="active">📊 运维总览</a></li>
-      <li><a href="#tasks" data-tab="tasks">🗓 采集任务</a></li>
-      <li><a href="#quality" data-tab="quality">✅ 数据质量</a></li>
-      <li><a href="#resources" data-tab="resources">💻 系统资源</a></li>
-      <li><a href="#logs" data-tab="logs">📜 运行日志</a></li>
-      <li><a href="#users" data-tab="users">👥 用户管理</a></li>
-      <li><a href="#security" data-tab="security">🔐 账号安全</a></li>
+      <li><a href="#overview" data-tab="overview" class="active">
+        <svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>运维总览</a></li>
+      <li><a href="#tasks" data-tab="tasks">
+        <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>采集任务</a></li>
+      <li><a href="#quality" data-tab="quality">
+        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>数据质量</a></li>
+      <li><a href="#resources" data-tab="resources">
+        <svg class="svg-icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>系统资源</a></li>
+      <li><a href="#logs" data-tab="logs">
+        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>运行日志</a></li>
+      <li><a href="#users" data-tab="users">
+        <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.6c2.7.4 4.7 2 5.4 4.4"/></svg>用户管理</a></li>
+      <li><a href="#security" data-tab="security">
+        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><circle cx="12" cy="10" r="2"/><path d="M12 12v5"/></svg>账号安全</a></li>
     </ul>
   </aside>
 
@@ -30,41 +37,54 @@
     <section class="admin-panel" id="panel-overview">
       <div class="admin-head">
         <div>
-          <h1>系统运维中心</h1>
+          <h1>运维总览</h1>
           <p class="section-note">SMM 数据采集、数据质量与服务器运行状态监控</p>
         </div>
         <div class="admin-head-right">
           <span class="overall-badge" id="overall-badge">加载中…</span>
-          <button class="btn" id="refresh-btn">立即刷新</button>
           <span class="section-note" id="last-checked"></span>
+          <button class="btn sm" id="refresh-btn">立即刷新</button>
         </div>
       </div>
 
+      <!-- 待处理告警（合并展示，默认少量 + 查看全部） -->
       <div id="alerts-box"></div>
-      <div class="metric-grid" id="cards-grid"></div>
 
-      <section class="section">
-        <div class="section-title">今日采集状态</div>
-        <div id="today-collection"></div>
-      </section>
-
-      <div class="two-col">
-        <section class="section">
-          <div class="section-title">最近任务</div>
-          <div id="recent-tasks"></div>
-        </section>
-        <section class="section">
-          <div class="section-title">最近异常</div>
-          <div id="recent-errors"></div>
-        </section>
+      <div class="overview-cols">
+        <div class="ov-left">
+          <section class="section">
+            <div class="section-title">服务与采集状态</div>
+            <div class="panel" id="status-table-box"></div>
+          </section>
+          <section class="section">
+            <div class="section-title">今日采集状态</div>
+            <div class="panel" style="padding:10px 14px"><div id="today-collection"></div></div>
+          </section>
+          <div class="two-col">
+            <section class="section">
+              <div class="section-title">最近任务</div>
+              <div class="panel" id="recent-tasks"></div>
+            </section>
+            <section class="section">
+              <div class="section-title">最近异常</div>
+              <div class="panel" id="recent-errors"></div>
+            </section>
+          </div>
+        </div>
+        <div class="ov-right">
+          <section class="section">
+            <div class="section-title">系统资源</div>
+            <div class="res-panel" id="resources-inline"></div>
+          </section>
+        </div>
       </div>
     </section>
 
     <!-- 采集任务 -->
     <section class="admin-panel" id="panel-tasks" hidden>
       <h2>采集任务</h2>
-      <p class="section-note">cron 定时任务（工作日）：10:00 早采 · 11:00 铜铝镍补采 · 12:30 全量兜底（含验证/导出/固定汇总/MySQL 同步）</p>
-      <div id="tasks-table"></div>
+      <p class="section-note">cron 定时任务（工作日）：9:05 早采 · 9:30 兜底补采 · @reboot 开机补采（含验证/导出/固定汇总/MySQL 同步）</p>
+      <div class="panel" id="tasks-table"></div>
     </section>
 
     <!-- 数据质量 -->
@@ -77,8 +97,8 @@
     <!-- 系统资源 -->
     <section class="admin-panel" id="panel-resources" hidden>
       <h2>系统资源</h2>
-      <p class="section-note">CPU / 内存 / 磁盘 / 运行时间（每张卡片标注最后检查时间，避免陈旧数据误读）</p>
-      <div class="metric-grid" id="resources-grid"></div>
+      <p class="section-note">CPU / 内存 / 磁盘 / 运行时间（标注最后检查时间，避免陈旧数据误读；缺失显示未知，不填 0）</p>
+      <div class="res-panel" id="resources-box"></div>
     </section>
 
     <!-- 运行日志 -->
@@ -86,9 +106,9 @@
       <h2>运行日志</h2>
       <p class="section-note">白名单日志（最多回看 7 天、单次 200 行；不支持任意路径读取）</p>
       <div class="log-controls">
-        <select id="log-name"></select>
-        <select id="log-day"></select>
-        <button class="btn" id="log-load">加载</button>
+        <select class="ctl" id="log-name"></select>
+        <select class="ctl" id="log-day"></select>
+        <button class="btn sm" id="log-load">加载</button>
       </div>
       <div class="log-note" id="log-path"></div>
       <pre class="log-view" id="log-view">加载中…</pre>
@@ -98,7 +118,7 @@
     <section class="admin-panel" id="panel-users" hidden>
       <h2>用户管理</h2>
       <p class="section-note">仅可操作普通用户（管理员账号与自身不可操作）。重置密码后初始密码为 123456，用户首次登录将被强制修改。删除为软删除，记录保留但无法登录。</p>
-      <div id="users-table"></div>
+      <div class="panel" id="users-table"></div>
     </section>
 
     <!-- 账号安全 -->
@@ -123,7 +143,7 @@
         </section>
         <section class="section">
           <div class="section-title">最近登录审计</div>
-          <div id="audit-table"></div>
+          <div class="panel" id="audit-table"></div>
         </section>
       </div>
     </section>
@@ -132,8 +152,9 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="/static/js/api.js"></script>
-<script src="/static/js/nav.js"></script>
-<script src="/static/js/admin.js"></script>
+<script src="/static/js/api.js?v=4"></script>
+<script src="/static/js/common.js?v=4"></script>
+<script src="/static/js/nav.js?v=4"></script>
+<script src="/static/js/admin.js?v=4"></script>
 </body>
 </html>
