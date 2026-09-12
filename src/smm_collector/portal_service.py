@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -782,3 +783,134 @@ def dataset_products(con: sqlite3.Connection, category: str | None = None,
     except sqlite3.Error:
         return []
     return [dict(r) for r in rows]
+
+
+# ── 全量采集产品目录（每日报价产品选择器用） ────────────────────
+# 与业务映射（business_products.yaml 49 条）解耦：DB 实际有什么就有什么。
+# 产品身份 = (source, category, product_name, specification, unit) 自然键；
+# 前端用 stable id (cp_<hash>) 引用。
+
+CATALOG_ID_PREFIX = "cp_"
+
+
+def catalog_natural_id(source: str, category: str, product_name: str,
+                        specification: str, unit: str) -> str:
+    """由自然键生成稳定 catalog id（SHA-256 前 12 位 hex + cp_ 前缀）。"""
+    key = f"{source}|{category}|{product_name}|{specification}|{unit}"
+    h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+    return f"{CATALOG_ID_PREFIX}{h}"
+
+
+def _catalog_display_label(p: dict) -> str:
+    """产品显示标签：名称 · 规格 · 单位。"""
+    parts = [p["product_name"]]
+    if p.get("specification"):
+        parts.append(p["specification"])
+    if p.get("unit"):
+        parts.append(p["unit"])
+    return " · ".join(parts)
+
+
+def _catalog_searchable(p: dict) -> str:
+    """搜索归一化文本（小写 + 拼接：分类/名称/规格/单位/source）。"""
+    parts = [p["category"], p["product_name"], p.get("specification") or "",
+             p.get("unit") or "", p.get("source") or ""]
+    return " ".join(parts).lower()
+
+
+def catalog_products(con: sqlite3.Connection) -> dict:
+    """GET /api/portal/catalog/products：DB 真实采集产品目录（去重自然键）。
+
+    排除 validation_status='invalid' 与 price_date 非 YYYY-MM-DD 格式的脏数据。
+    """
+    try:
+        rows = con.execute(
+            "SELECT source, category, product_name, specification, unit, "
+            "COUNT(*) AS row_count, MAX(price_date) AS latest_price_date "
+            "FROM lithium_spot_prices "
+            "WHERE validation_status != 'invalid' "
+            "AND price_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' "
+            "GROUP BY source, category, product_name, specification, unit "
+            "ORDER BY category, product_name, specification"
+        ).fetchall()
+    except sqlite3.Error:
+        return {"meta": {"generated_at": datetime.now().isoformat(timespec="seconds"),
+                         "source": "sqlite", "total": 0},
+                "products": [], "categories": []}
+    products = []
+    categories: set[str] = set()
+    for r in rows:
+        d = dict(r)
+        cid = catalog_natural_id(d["source"], d["category"], d["product_name"],
+                                 d["specification"], d["unit"])
+        products.append({
+            "id": cid,
+            "source": d["source"],
+            "category": d["category"],
+            "product_name": d["product_name"],
+            "specification": d["specification"],
+            "unit": d["unit"],
+            "display_label": _catalog_display_label(d),
+            "searchable": _catalog_searchable(d),
+            "latest_price_date": d["latest_price_date"],
+            "row_count": d["row_count"],
+        })
+        categories.add(d["category"])
+    return {
+        "meta": {"generated_at": datetime.now().isoformat(timespec="seconds"),
+                 "source": "sqlite", "total": len(products)},
+        "products": products,
+        "categories": sorted(categories),
+    }
+
+
+def catalog_quotes(con: sqlite3.Connection, ids: list[str],
+                   as_of: str | None = None) -> dict:
+    """GET /api/portal/catalog/quotes?ids=...&as_of=...：按 catalog id 列表返回最新报价。
+
+    as_of 语义：含该日及更早的最近一条有效报价（与 /api/portal/quotes 一致）；
+    未指定 as_of = 最新可用报价；绝不含 as_of 之后的价格。
+    未知 id 静默忽略；空 ids 返回空 rows。
+    """
+    cat = catalog_products(con)
+    by_id = {p["id"]: p for p in cat["products"]}
+    rows_out = []
+    for cid in ids:
+        p = by_id.get(cid)
+        if not p:
+            continue
+        conds = [
+            "source = ?", "category = ?", "product_name = ?",
+            "specification = ?", "unit = ?",
+            "validation_status != 'invalid'",
+            "price_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+        ]
+        params = [p["source"], p["category"], p["product_name"],
+                  p["specification"], p["unit"]]
+        if as_of:
+            conds.append("price_date <= ?")
+            params.append(as_of)
+        where = " AND ".join(conds)
+        try:
+            r = con.execute(
+                f"SELECT * FROM lithium_spot_prices WHERE {where} "
+                "ORDER BY price_date DESC, collected_at DESC LIMIT 1",
+                tuple(params)).fetchone()
+        except sqlite3.Error:
+            r = None
+        rows_out.append({
+            "id": cid,
+            "source": p["source"],
+            "category": p["category"],
+            "product_name": p["product_name"],
+            "specification": p["specification"],
+            "unit": p["unit"],
+            "display_label": p["display_label"],
+            "quote": point_payload(dict(r)) if r else None,
+        })
+    return {
+        "meta": {"generated_at": datetime.now().isoformat(timespec="seconds"),
+                 "source": "sqlite", "as_of": as_of,
+                 "db_latest_date": _db_latest_date(con)},
+        "rows": rows_out,
+    }

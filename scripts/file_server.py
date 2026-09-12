@@ -1346,6 +1346,10 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._api_portal_dataset_products(parse_qs(urlsplit(self.path).query))
         elif path == "/api/portal/dataset/quotes":
             self._api_portal_dataset_quotes(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/portal/catalog/products":
+            self._api_portal_catalog_products()
+        elif path == "/api/portal/catalog/quotes":
+            self._api_portal_catalog_quotes(parse_qs(urlsplit(self.path).query))
         elif path.startswith("/api/"):
             self._serve_json({"error": "not found"}, status=404)
 
@@ -1965,6 +1969,30 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         payload["meta"] = {"generated_at": datetime.now().isoformat(timespec="seconds"),
                            "source": "sqlite"}
         self._serve_json(payload)
+
+    def _api_portal_catalog_products(self):
+        """GET /api/portal/catalog/products：DB 全量采集产品目录（每日报价选择器用）。
+
+        不受业务映射 40 条限制；身份 = 自然键去重，稳定 catalog id。
+        """
+        con = _db_conn()
+        try:
+            self._serve_json(portal_service.catalog_products(con))
+        finally:
+            con.close()
+
+    def _api_portal_catalog_quotes(self, q: dict):
+        """GET /api/portal/catalog/quotes?ids=...&as_of=YYYY-MM-DD：按 catalog id 列表返回最新报价。"""
+        ids = [i.strip() for i in (q.get("ids") or [""])[0].split(",") if i.strip()]
+        as_of = (q.get("as_of") or [None])[0]
+        if as_of and portal_service.parse_date(as_of) is None:
+            self._serve_json({"error": "as_of 格式非法（YYYY-MM-DD）"}, status=400)
+            return
+        con = _db_conn()
+        try:
+            self._serve_json(portal_service.catalog_quotes(con, ids, as_of=as_of))
+        finally:
+            con.close()
 
     def _api_quality(self) -> dict:
         manifests = _all_manifests()
