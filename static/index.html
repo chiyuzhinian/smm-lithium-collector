@@ -40,8 +40,15 @@
       <label for="prod-pick">产品</label>
       <div class="search-wrap">
         <button class="ctl pick-input" id="prod-pick" type="button"
-                aria-haspopup="listbox" title="点击选择产品（可多选、可跨类别累积）">选择产品 ▾</button>
-        <div class="search-suggest" id="prod-suggest"></div>
+                aria-haspopup="listbox" title="点击选择产品（默认展示业务品种；可选全量采集产品）">选择产品 ▾</button>
+        <div class="search-suggest prod-suggest" id="prod-suggest" hidden>
+          <div class="suggest-search-row">
+            <input type="text" class="suggest-search" id="prod-search-input"
+                   placeholder="搜索全量采集产品（名称/规格/分类/单位，可分组浏览）" autocomplete="off" />
+            <span class="suggest-counter" id="prod-suggest-counter">—</span>
+          </div>
+          <div class="suggest-list" id="prod-suggest-list"></div>
+        </div>
       </div>
     </div>
     <div class="field search-field">

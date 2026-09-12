@@ -1,15 +1,19 @@
 /* 每日报价：SMM 业务品种最新报价（as_of 日期语义 + 展开详情）
    V5：删除组织下拉；分类前移 + 产品多选（chips 跨类别累积）；
-   主列显示 SMM 原始产品名+规格，业务名作副行小字。 */
+   主列显示 SMM 原始产品名+规格，业务名作副行小字。
+   V7：产品选择器接入全量采集目录（/api/portal/catalog/products）；
+   默认无选择 = 40 条 SMM 业务品种；多选后切换为 catalog 报价。 */
 "use strict";
 
 const qstate = {
-  products: [],   // 全量产品（含 searchable）
-  rows: [],       // 服务端筛选后的报价行
-  visible: [],    // picked 过滤后的展示行
+  products: [],      // 40 条 SMM 业务产品（默认展示 + 搜索高亮）
+  catalog: [],       // DB 全量产品目录（产品选择器下拉）
+  catalogById: {},   // id → catalog product
+  rows: [],          // 当前展示行（business quotes 或 catalog quotes）
+  visible: [],       // 实际渲染的行（rows 经 picked 过滤后）
   q: "",
   cat: "",
-  picked: [],     // 有序产品 id（跨类别累积）
+  picked: [],        // 有序 catalog id（无选择 = 默认业务产品）
   asOf: "",
   filters: {},
   expanded: new Set(),
@@ -30,6 +34,7 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   bindFilters();
+  // 业务产品（默认展示 + 搜索）
   try {
     const data = await API.get("/api/portal/products", 60000);
     qstate.products = data.products.filter((p) => p.source === "SMM");
@@ -45,6 +50,19 @@ async function init() {
       emptyHtml("⚠️", "业务品种映射加载失败：" + err.message);
     return;
   }
+  // 全量采集产品目录（下拉选择器）
+  try {
+    const catData = await API.get("/api/portal/catalog/products", 60000);
+    qstate.catalog = catData.products || [];
+    qstate.catalogById = {};
+    for (const p of qstate.catalog) qstate.catalogById[p.id] = p;
+    // 同步分类下拉为全量分类（首次加载完成后再切换标签提示）
+    fillCatalogSelect(catData.categories || []);
+    document.getElementById("prod-suggest-counter").textContent =
+      `${qstate.catalog.length} 个全量产品可选`;
+  } catch (err) {
+    notify("全量产品目录加载失败：" + err.message, "error");
+  }
   await refresh();
 }
 
@@ -54,23 +72,26 @@ function bindFilters() {
     renderSuggest();
   });
   document.getElementById("q-input").addEventListener("focus", () => renderSuggest(true));
-  document.getElementById("prod-pick").addEventListener("click", () => {
-    const box = document.getElementById("prod-suggest");
-    if (box.classList.contains("open")) box.classList.remove("open");
-    else renderProdSuggest(true);
+  document.getElementById("prod-pick").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleProdSuggest();
   });
+  // 产品选择器内搜索
+  document.getElementById("prod-search-input").addEventListener("input", () => {
+    renderProdSuggestList();
+  });
+  document.getElementById("prod-search-input").addEventListener("click", (e) => e.stopPropagation());
   document.addEventListener("click", (e) => {
     const s = document.getElementById("q-suggest");
     if (s && !e.target.closest(".search-wrap")) s.classList.remove("open");
     const p = document.getElementById("prod-suggest");
     if (p && !e.target.closest("#prod-pick") && !e.target.closest("#prod-suggest")) {
-      p.classList.remove("open");
+      p.hidden = true;
     }
   });
   document.getElementById("cat-select").addEventListener("change", async (e) => {
     qstate.cat = e.target.value;
-    document.getElementById("prod-suggest").classList.remove("open");
-    await refresh();
+    if (qstate.picked.length === 0) await refresh();
   });
   document.getElementById("asof-input").addEventListener("change", async (e) => {
     qstate.asOf = e.target.value;
@@ -81,16 +102,23 @@ function bindFilters() {
     document.getElementById("q-input").value = "";
     document.getElementById("cat-select").value = "";
     document.getElementById("asof-input").value = "";
+    document.getElementById("prod-search-input").value = "";
     document.getElementById("q-suggest").classList.remove("open");
-    document.getElementById("prod-suggest").classList.remove("open");
+    document.getElementById("prod-suggest").hidden = true;
     renderPickedChips();
     refresh();
   });
   document.getElementById("btn-trends").addEventListener("click", (e) => {
-    const ids = qstate.picked.length ? qstate.picked : qstate.visible.map((r) => r.id);
+    const ids = qstate.picked.length
+      ? qstate.picked.filter((id) => !id.startsWith("cp_"))  // 仅传递业务产品 id
+      : qstate.visible.map((r) => r.id);
     if (ids.length) {
       e.preventDefault();
       location.href = "/trends?ids=" + encodeURIComponent(ids.join(","));
+    } else if (qstate.picked.length) {
+      // 仅 catalog 产品被选 → 趋势页暂不支持
+      e.preventDefault();
+      notify("所选为全量采集产品（不在业务映射内），暂不支持价格走势", "info");
     }
   });
 }
@@ -104,13 +132,29 @@ function fillSelects(data) {
   }
 }
 
+function fillCatalogSelect(categories) {
+  // 业务 info_categories 保持原样；不影响 catalog（catalog 按自身 category 分组渲染）
+  // 保留此函数以备后续：若需要切换 cat-select 为全量分类，可在此扩展
+  void categories;
+}
+
 function setAsOfBounds(meta) {
   const inp = document.getElementById("asof-input");
   if (meta.history_from) inp.min = meta.history_from;
   if (meta.db_latest_date) inp.max = meta.db_latest_date;
 }
 
-/* ── 产品搜索下拉 ── */
+function toggleProdSuggest() {
+  const box = document.getElementById("prod-suggest");
+  box.hidden = !box.hidden;
+  if (!box.hidden) {
+    const inp = document.getElementById("prod-search-input");
+    if (inp) inp.focus();
+    renderProdSuggestList();
+  }
+}
+
+/* ── 业务产品搜索下拉（q-input 高亮） ── */
 
 function searchProducts() {
   const q = qstate.q.toLowerCase();
@@ -147,37 +191,49 @@ function renderSuggest(forceOpen) {
   box.classList.add("open");
 }
 
-/* ── 产品多选下拉（级联类别；选中项跨类别累积） ── */
+/* ── 全量产品选择下拉（catalog） ── */
 
-function categoryProducts() {
-  if (!qstate.cat) return qstate.products;
-  return qstate.products.filter((p) => p.info_category === qstate.cat);
-}
-
-function renderProdSuggest(open) {
-  const box = document.getElementById("prod-suggest");
-  if (!open) { box.classList.remove("open"); return; }
-  const hits = categoryProducts();
+function renderProdSuggestList() {
+  const list = document.getElementById("prod-suggest-list");
+  if (!list) return;
+  const q = (document.getElementById("prod-search-input") || {}).value || "";
+  const norm = q.toLowerCase();
+  const hits = qstate.catalog.filter((p) => !norm || (p.searchable || "").includes(norm));
   if (!hits.length) {
-    box.innerHTML = `<div class="suggest-empty">该类别下没有产品</div>`;
-  } else {
-    box.innerHTML = hits.map((p) => {
-      const picked = qstate.picked.includes(p.id);
-      return `<button type="button" class="suggest-item" data-id="${escHtml(p.id)}">
-        <div class="suggest-name">${picked ? "✓ " : ""}${escHtml(p.display_name)}
-          ${p.spec ? `<span style="font-weight:400;color:var(--ink-3)"> · ${escHtml(p.spec.slice(0, 32))}${p.spec.length > 32 ? "…" : ""}</span>` : ""}
-          <span style="float:right;color:var(--ink-3);font-size:11px">${escHtml(p.unit)}</span></div>
-        <div class="suggest-spec">SMM ${escHtml((p.series[0] || {}).product_name || "")} · ${escHtml(p.info_category)}</div>
-      </button>`;
-    }).join("");
-    box.querySelectorAll(".suggest-item").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        togglePicked(btn.dataset.id);
-        box.classList.remove("open");
-      });
-    });
+    list.innerHTML = `<div class="suggest-empty">没有匹配的产品</div>`;
+    return;
   }
-  box.classList.add("open");
+  // 按 category 分组
+  const byCat = {};
+  for (const p of hits) {
+    if (!byCat[p.category]) byCat[p.category] = [];
+    byCat[p.category].push(p);
+  }
+  const sortedCats = Object.keys(byCat).sort((a, b) => {
+    if (a === qstate.cat) return -1;
+    if (b === qstate.cat) return 1;
+    return a.localeCompare(b, "zh");
+  });
+  list.innerHTML = sortedCats.map((cat) => `
+    <div class="suggest-group">
+      <div class="suggest-group-title">${escHtml(cat)} <span class="muted">(${byCat[cat].length})</span></div>
+      ${byCat[cat].map((p) => {
+        const picked = qstate.picked.includes(p.id);
+        return `<button type="button" class="suggest-item" data-id="${escHtml(p.id)}">
+          <div class="suggest-name">${picked ? "✓ " : ""}${escHtml(p.product_name)}
+            ${p.specification ? `<span class="muted"> · ${escHtml(p.specification.slice(0, 32))}${p.specification.length > 32 ? "…" : ""}</span>` : ""}
+            <span class="muted right">${escHtml(p.unit)}</span></div>
+          <div class="suggest-spec">${escHtml(p.source)} · ${escHtml(p.category)}</div>
+        </button>`;
+      }).join("")}
+    </div>
+  `).join("");
+  list.querySelectorAll(".suggest-item").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePicked(btn.dataset.id);
+    });
+  });
 }
 
 function togglePicked(id) {
@@ -185,32 +241,26 @@ function togglePicked(id) {
   if (i >= 0) qstate.picked.splice(i, 1);
   else qstate.picked.push(id);
   renderPickedChips();
-  applyPickedFilter();
+  renderProdSuggestList();
+  refresh();
 }
 
 function renderPickedChips() {
   const row = document.getElementById("picked-chips");
   row.innerHTML = qstate.picked.map((id) => {
-    const p = qstate.products.find((x) => x.id === id);
+    const p = qstate.catalogById[id] || qstate.products.find((x) => x.id === id);
     if (!p) return "";
-    const name = p.spec ? `${p.display_name}（${p.spec}）` : p.display_name;
+    const name = p.display_label
+      || (p.spec ? `${p.display_name}（${p.spec}）` : p.display_name)
+      || `${p.product_name}${p.specification ? "（" + p.specification + "）" : ""}`;
     return `<span class="legend-chip">
       <span class="chip-name" title="${escHtml(name)}">${escHtml(name)}</span>
       <button class="legend-remove" data-id="${escHtml(id)}" aria-label="移除 ${escHtml(name)}">×</button>
     </span>`;
   }).join("");
   row.querySelectorAll(".legend-remove").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      togglePicked(btn.dataset.id);
-    });
+    btn.addEventListener("click", () => togglePicked(btn.dataset.id));
   });
-}
-
-function applyPickedFilter() {
-  qstate.visible = qstate.picked.length
-    ? qstate.rows.filter((r) => qstate.picked.includes(r.id))
-    : qstate.rows;
-  renderTable();
 }
 
 /* ── 数据加载 ── */
@@ -218,30 +268,47 @@ function applyPickedFilter() {
 async function refresh() {
   const scroll = document.getElementById("table-scroll");
   scroll.innerHTML = loadingHtml("正在加载最新报价…");
-  const params = new URLSearchParams();
-  if (qstate.asOf) params.set("as_of", qstate.asOf);
-  if (qstate.cat) params.set("info_category", qstate.cat);
   try {
-    const data = await API.get("/api/portal/quotes?" + params.toString(), 15000);
-    qstate.rows = data.rows;
-    updateStatus(data);
-    applyPickedFilter();
+    if (qstate.picked.length > 0) {
+      // 用户多选 → 走 catalog 报价接口
+      const params = new URLSearchParams();
+      params.set("ids", qstate.picked.join(","));
+      if (qstate.asOf) params.set("as_of", qstate.asOf);
+      const data = await API.get("/api/portal/catalog/quotes?" + params.toString(), 15000);
+      qstate.rows = (data.rows || []).map((r) => ({ ...r, __catalog: true }));
+    } else {
+      // 默认 → 业务映射最新报价
+      const params = new URLSearchParams();
+      if (qstate.asOf) params.set("as_of", qstate.asOf);
+      if (qstate.cat) params.set("info_category", qstate.cat);
+      const data = await API.get("/api/portal/quotes?" + params.toString(), 15000);
+      qstate.rows = data.rows || [];
+    }
+    updateStatus();
+    qstate.visible = qstate.rows;
+    renderTable();
   } catch (err) {
     scroll.innerHTML = emptyHtml("⚠️", "报价加载失败：" + err.message);
   }
 }
 
-function updateStatus(data) {
-  const meta = data.meta || {};
-  document.getElementById("st-latest").textContent = meta.db_latest_date || "—";
-  let latestCollected = "—";
-  for (const r of data.rows) {
-    if (r.quote && r.quote.collected_at > latestCollected) latestCollected = r.quote.collected_at;
-  }
-  document.getElementById("st-collected").textContent = latestCollected === "—" ? "—" : fmtTs(latestCollected);
+function updateStatus() {
+  const meta = qstate.rows && qstate.rows[0] ? (qstate.rows[0].quote || {}) : {};
+  const latestDate = qstate.rows.reduce((m, r) => {
+    const d = (r.quote && r.quote.price_date) || "";
+    return d > m ? d : m;
+  }, "");
+  const latestCollected = qstate.rows.reduce((m, r) => {
+    const t = (r.quote && r.quote.collected_at) || "";
+    return t > m ? t : m;
+  }, "");
+  document.getElementById("st-latest").textContent = latestDate || "—";
+  document.getElementById("st-collected").textContent = latestCollected ? fmtTs(latestCollected) : "—";
   document.getElementById("st-count").textContent = qstate.visible.length;
   document.getElementById("result-count").innerHTML =
-    `共 <b>${qstate.visible.length}</b> 个业务品种` +
+    (qstate.picked.length
+      ? `已选 <b>${qstate.picked.length}</b> 个全量产品`
+      : `共 <b>${qstate.visible.length}</b> 个业务品种`) +
     (qstate.asOf ? ` · 截至 <b class="num">${escHtml(qstate.asOf)}</b> 的最新报价` : " · 最新可用报价");
 }
 
@@ -250,7 +317,10 @@ function updateStatus(data) {
 function renderTable() {
   const scroll = document.getElementById("table-scroll");
   if (qstate.visible.length === 0) {
-    scroll.innerHTML = emptyHtml("📭", "没有符合条件的品种，请调整筛选条件");
+    const msg = qstate.picked.length
+      ? "所选产品暂无报价数据，请调整选择"
+      : "没有符合条件的品种，请调整筛选条件";
+    scroll.innerHTML = emptyHtml("📭", msg);
     return;
   }
   const head = `
@@ -266,7 +336,7 @@ function renderTable() {
       <th class="num-cell">采集更新</th>
       <th class="ctr">频次</th>
     </tr></thead>
-    <tbody id="quotes-tbody">${qstate.visible.map(rowHtml).join("")}</tbody>
+    <tbody id="quotes-tbody">${qstate.visible.map((r) => r.__catalog ? rowHtmlCatalog(r) : rowHtml(r)).join("")}</tbody>
   </table>`;
   scroll.innerHTML = head;
   scroll.querySelectorAll(".expand-btn").forEach((btn) => {
@@ -317,6 +387,35 @@ function rowHtml(r) {
   </tr>`;
 }
 
+function rowHtmlCatalog(r) {
+  const q = r.quote;
+  const noQuote = !q;
+  const primary = r.product_name + (r.specification ? ` / ${r.specification}` : "");
+  const subLine = `<div class="product-spec">${escHtml(r.category)} · ${escHtml(r.source)}</div>`;
+  const cells = noQuote
+    ? `<td class="num-cell" colspan="4"><span style="color:var(--ink-3)">暂无数据</span></td>`
+    : `
+      <td class="num-cell">${priceText(q.min_price)}</td>
+      <td class="num-cell">${priceText(q.max_price)}</td>
+      <td class="num-cell avg-cell">${priceText(q.average_price)}</td>
+      <td class="num-cell change-cell">${changeBadge(q.change_value)}</td>`;
+  return `
+  <tr id="row-${escHtml(r.id)}" class="${noQuote ? "row-blank" : ""}">
+    <td class="product-cell">
+      <div class="product-name-row">
+        <span class="product-name">${escHtml(primary)}</span>
+        <span class="pname-tags"><span class="pnote">全量采集</span></span>
+      </div>
+      ${subLine}
+    </td>
+    ${cells}
+    <td class="ctr">${escHtml(r.unit || (q ? q.unit : ""))}</td>
+    <td class="num-cell">${q ? q.price_date : "—"}</td>
+    <td class="num-cell" style="color:var(--ink-3)">${q ? fmtTs(q.collected_at) : "—"}</td>
+    <td class="ctr"><span class="tag daily">日频</span></td>
+  </tr>`;
+}
+
 function changeBadge(v) {
   if (v === null || v === undefined || v === "") return "—";
   const n = Number(String(v).replace(/,/g, ""));
@@ -361,17 +460,18 @@ function detailHtml(r) {
 function toggleRow(id) {
   const detail = document.getElementById("detail-" + id);
   const row = document.getElementById("row-" + id);
+  if (!detail || !row) return;
   const btn = row.querySelector(".expand-btn");
   if (detail.hidden) {
     qstate.expanded.add(id);
     detail.hidden = false;
     row.classList.add("expanded");
-    btn.textContent = "▾";
+    if (btn) btn.textContent = "▾";
   } else {
     qstate.expanded.delete(id);
     detail.hidden = true;
     row.classList.remove("expanded");
-    btn.textContent = "▸";
+    if (btn) btn.textContent = "▸";
   }
 }
 
