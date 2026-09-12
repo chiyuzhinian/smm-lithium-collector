@@ -1,8 +1,8 @@
-/* 价格走势：单产品区间带+指标曲线 / 多产品对比（趋势分析页，无底部明细表）
+/* 价格走势：每个产品独立 Chart Card（多选后不混在同一坐标系）
    V5：点选多产品不限数量；跨单位自动双 Y 轴（>2 种单位提示不可比）；
-   图例带单位；区间内无点标「暂无历史价格」；无选择显示引导；
-   图表高度随系列数自适应；浅色主题常量。
-   V6：产品下拉全量（无 10 条上限）；调色板 10 色外黄金角扩展（>10 不撞色）；图例滚动。 */
+   图例带单位；区间内无点标「暂无历史价格」；无选择显示引导。
+   V6：产品下拉全量（无 10 条上限）；调色板 10 色外黄金角扩展（>10 不撞色）。
+   V7：单 chart → N 个独立 ECharts 实例 + 独立 Y 轴（解决不同产品价格量级压缩问题）。 */
 "use strict";
 
 /* 多序列分类色：前 10 槽位固定（浅色表面友好，色相区分大），槽位随产品稳定不循环；
@@ -18,7 +18,7 @@ function colorAt(i) {
 }
 const BRAND_BLUE = "#2563eb";
 const BAND_FILL = "rgba(37, 99, 235, 0.10)";
-const BAND_EDGE = "rgba(37, 99, 235, 0.30)";
+const BAND_EDGE = "rgba(37, 99, 35, 0.30)";
 
 /* 浅色图表常量（与 app.css 浅色令牌一致） */
 const CHART = {
@@ -40,9 +40,10 @@ const tstate = {
   dbLatest: null,
   historyFrom: null,
   series: [],         // 服务端返回
-  chart: null,
-  colorMap: new Map(), // 产品 id → 配色槽位（会话内稳定，移除产品不影响他者颜色）
+  charts: new Map(),  // id -> ECharts instance
+  chartEls: new Map(),// id -> DOM element
   ro: null,            // ResizeObserver
+  colorMap: new Map(), // 产品 id → 配色槽位（仅用于 chip 颜色，与 Y 轴无关）
 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -62,11 +63,11 @@ async function init() {
     notify("产品映射加载失败：" + err.message, "error");
     return;
   }
-  // 图表尺寸随容器变化（视口缩放/筛选换行都会触发）
+  // 容器尺寸监听（多 chart 用统一 observer）
   tstate.ro = new ResizeObserver(() => {
-    if (tstate.chart) tstate.chart.resize();
+    for (const inst of tstate.charts.values()) inst.resize();
   });
-  tstate.ro.observe(document.getElementById("chart"));
+  tstate.ro.observe(document.getElementById("chart-grid"));
 
   // URL 参数：/trends?ids=a,b&from=&to=；无参数 = 空选择（引导用户点选）
   const params = new URLSearchParams(location.search);
@@ -77,7 +78,7 @@ async function init() {
   if (params.get("from")) { tstate.range = "custom"; tstate.from = params.get("from"); tstate.to = params.get("to"); }
   syncRangeUI();
   await loadData();
-  renderChart();
+  renderCharts();
 }
 
 function bindControls() {
@@ -87,7 +88,6 @@ function bindControls() {
   document.getElementById("product-pick").addEventListener("focus", function () {
     renderSuggest(this.value.trim());
   });
-  // 点选产品后输入框保持焦点，focus 不再触发——click 时重渲染，保证再次点开显示全量列表
   document.getElementById("product-pick").addEventListener("click", function () {
     renderSuggest(this.value.trim());
   });
@@ -100,7 +100,7 @@ function bindControls() {
       tstate.range = b.dataset.range;
       syncRangeUI();
       await loadData();
-      renderChart();
+      renderCharts();
     });
   });
   document.querySelectorAll("#metric-seg button").forEach((b) => {
@@ -109,20 +109,22 @@ function bindControls() {
       document.querySelectorAll("#metric-seg button").forEach((x) => x.classList.remove("active"));
       b.classList.add("active");
       updateChartHead();
-      renderChart();
+      renderCharts();
     });
   });
   document.getElementById("from-input").addEventListener("change", async () => {
     tstate.from = document.getElementById("from-input").value || null;
     await loadData();
-    renderChart();
+    renderCharts();
   });
   document.getElementById("to-input").addEventListener("change", async () => {
     tstate.to = document.getElementById("to-input").value || null;
     await loadData();
-    renderChart();
+    renderCharts();
   });
-  window.addEventListener("resize", () => tstate.chart && tstate.chart.resize());
+  window.addEventListener("resize", () => {
+    for (const inst of tstate.charts.values()) inst.resize();
+  });
 }
 
 function syncRangeUI() {
@@ -174,7 +176,7 @@ function renderSuggest(q) {
         box.classList.remove("open");
         document.getElementById("product-pick").value = "";
         await loadData();
-        renderChart();
+        renderCharts();
       });
     });
   }
@@ -185,12 +187,12 @@ function addProduct(id, silent) {
   const p = tstate.products.find((x) => x.id === id);
   if (!p || tstate.selected.includes(id)) return;
   tstate.selected.push(id);
-  renderChips();
+  if (!silent) renderChips();
 }
 
 function removeProduct(id) {
   tstate.selected = tstate.selected.filter((x) => x !== id);
-  tstate.colorMap.delete(id);  // 释放槽位，保证无撞色
+  tstate.colorMap.delete(id);
   renderChips();
 }
 
@@ -213,19 +215,19 @@ function chipColor(id) {
   return tstate.selected.length === 1 ? BRAND_BLUE : colorAt(colorSlot(id));
 }
 
-/* 图表头：指标/单位/时间范围 + 已选产品图例（含区间带标注） */
+/* 图表头：指标/单位/时间范围 + 已选产品图例 */
 function updateChartHead() {
   const { from, to } = currentWindow();
   const units = [...new Set(tstate.series.map((s) => s.unit).filter(Boolean))];
   const unit = units.length === 1 ? units[0] : (units.length > 1 ? "多单位" : "");
   const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
-  const label = tstate.selected.length === 1 ? metricNames[tstate.metric] : "多产品对比";
+  const label = tstate.selected.length === 1 ? metricNames[tstate.metric] : `${tstate.selected.length} 个产品独立走势`;
   document.getElementById("chart-metric-label").textContent = label;
   document.getElementById("chart-range-label").textContent =
     `${unit ? unit + " · " : ""}${from && to ? from + " ~ " + to : "—"}`;
 }
 
-/* 单品种紧凑摘要：期末日均价 · 区间首末变化（带实际日期，非源字段当日涨跌） · 有效报价点数 */
+/* 摘要：期末日均价 + 区间变化 + 无历史价格产品 + 多单位提示 */
 function renderSummary() {
   const el = document.getElementById("chart-summary");
   const emptyIds = tstate.series
@@ -236,36 +238,41 @@ function renderSummary() {
     ? `<span class="status-sep">·</span><span>暂无历史价格：${emptyIds.map((p) => `${escHtml(p.display_name)}（${escHtml(p.unit)}）`).join("、")}</span>` : "";
   const multiUnitNote = tstate.selected.length > 1 &&
     new Set(tstate.series.map((s) => s.unit).filter(Boolean)).size > 2
-    ? `<span class="status-sep">·</span><span>所选产品单位超过 2 种，数值不具直接可比性，仅并列展示</span>` : "";
-  if (tstate.selected.length !== 1) {
-    el.innerHTML = emptyNote + multiUnitNote;
+    ? `<span class="status-sep">·</span><span>所选产品单位超过 2 种，每张图独立 Y 轴仅供参考</span>` : "";
+  if (tstate.selected.length === 0) {
+    el.innerHTML = "";
     return;
   }
-  const s = tstate.series.find((x) => x.id === tstate.selected[0]);
-  if (!s || !s.points || !s.points.length) { el.innerHTML = ""; return; }
-  const pts = s.points.filter((p) => num(p.average_price) !== null);
-  const unit = s.unit || "";
-  const last = pts[pts.length - 1];
-  const first = pts[0];
-  const lastText = `<b>${priceText(last.average_price)}</b> ${escHtml(unit)}（${escHtml(last.price_date)}）`;
-  let chgText = "—";
-  let chgCls = "sum-flat";
-  if (pts.length >= 2 && first !== last) {
-    const f = num(first.average_price), l = num(last.average_price);
-    if (f && f !== 0) {
-      const diff = l - f;
-      const pct = (diff / f) * 100;
-      const sign = diff > 0 ? "+" : "";
-      chgText = `${sign}${groupPrice(diff.toFixed(Math.abs(diff) >= 100 ? 0 : Math.abs(diff) >= 1 ? 2 : 4))} / ${sign}${pct.toFixed(2)}%（${escHtml(first.price_date)} → ${escHtml(last.price_date)}）`;
-      chgCls = diff > 0 ? "sum-up" : diff < 0 ? "sum-down" : "sum-flat";
+  if (tstate.selected.length === 1) {
+    const s = tstate.series.find((x) => x.id === tstate.selected[0]);
+    if (!s || !s.points || !s.points.length) { el.innerHTML = emptyNote + multiUnitNote; return; }
+    const pts = s.points.filter((p) => num(p.average_price) !== null);
+    const unit = s.unit || "";
+    const last = pts[pts.length - 1];
+    const first = pts[0];
+    const lastText = `<b>${priceText(last.average_price)}</b> ${escHtml(unit)}（${escHtml(last.price_date)}）`;
+    let chgText = "—";
+    let chgCls = "sum-flat";
+    if (pts.length >= 2 && first !== last) {
+      const f = num(first.average_price), l = num(last.average_price);
+      if (f && f !== 0) {
+        const diff = l - f;
+        const pct = (diff / f) * 100;
+        const sign = diff > 0 ? "+" : "";
+        chgText = `${sign}${groupPrice(diff.toFixed(Math.abs(diff) >= 100 ? 0 : Math.abs(diff) >= 1 ? 2 : 4))} / ${sign}${pct.toFixed(2)}%（${escHtml(first.price_date)} → ${escHtml(last.price_date)}）`;
+        chgCls = diff > 0 ? "sum-up" : diff < 0 ? "sum-down" : "sum-flat";
+      }
     }
+    el.innerHTML =
+      `<span>期末日均价 ${lastText}</span>` +
+      `<span class="status-sep">·</span>` +
+      `<span>区间变化 <b class="${chgCls}">${chgText}</b></span>` +
+      `<span class="status-sep">·</span>` +
+      `<span>有效报价点 <b>${pts.length}</b></span>` +
+      emptyNote + multiUnitNote;
+    return;
   }
-  el.innerHTML =
-    `<span>期末日均价 ${lastText}</span>` +
-    `<span class="status-sep">·</span>` +
-    `<span>区间变化 <b class="${chgCls}">${chgText}</b></span>` +
-    `<span class="status-sep">·</span>` +
-    `<span>有效报价点 <b>${pts.length}</b></span>`;
+  el.innerHTML = `<span>已为 <b>${tstate.selected.length}</b> 个产品生成独立走势图</span>` + emptyNote + multiUnitNote;
 }
 
 function renderChips() {
@@ -276,11 +283,10 @@ function renderChips() {
     const s = tstate.series.find((x) => x.id === id);
     const empty = s && (!s.points || !s.points.length);
     const name = p.spec ? `${p.display_name}（${p.spec}）` : p.display_name;
-    const multi = tstate.selected.length > 1;
     return `<span class="legend-chip">
       <span class="legend-dot" style="background:${chipColor(id)}"></span>
       <span class="chip-name" title="${escHtml(name)}">${escHtml(name)}${p.unit ? `<span class="chip-unit">${escHtml(p.unit)}</span>` : ""}${empty ? `<span class="chip-empty">暂无历史价格</span>` : ""}</span>
-      ${multi ? `<button class="legend-remove" data-id="${escHtml(id)}" aria-label="移除 ${escHtml(name)}">×</button>` : ""}
+      <button class="legend-remove" data-id="${escHtml(id)}" aria-label="移除 ${escHtml(name)}">×</button>
     </span>`;
   }).join("");
   const band = tstate.selected.length === 1
@@ -290,7 +296,7 @@ function renderChips() {
     btn.addEventListener("click", async () => {
       removeProduct(btn.dataset.id);
       await loadData();
-      renderChart();
+      renderCharts();
     });
   });
   updateChartHead();
@@ -322,48 +328,83 @@ function num(v) {
   return isFinite(n) ? n : null;
 }
 
-/* X 轴日期标签：同年 MM-DD，跨年 YYYY-MM-DD（Tooltip 恒为完整日期） */
+/* X 轴日期标签：同年 MM-DD，跨年 YYYY-MM-DD */
 function axisDateFormatter() {
   const { from, to } = currentWindow();
   const crossYear = from && to && from.slice(0, 4) !== to.slice(0, 4);
   return (v) => (crossYear ? v : String(v).slice(5));
 }
 
-function renderChart() {
-  const el = document.getElementById("chart");
-  if (!tstate.chart) tstate.chart = echarts.init(el);
-  const single = tstate.selected.length === 1;
-  const s = tstate.series.find((x) => x.id === tstate.selected[0]);
-  updateChartHead();
-  renderSummary();
-  // 图表高度随系列数自适应（单产品回落 CSS clamp）
-  if (!single) {
-    el.style.height = Math.min(360 + (tstate.selected.length - 1) * 70, 920) + "px";
-  } else {
-    el.style.height = "";
+/* 销毁旧 chart 实例 */
+function disposeCharts() {
+  for (const inst of tstate.charts.values()) {
+    try { inst.dispose(); } catch (e) { void e; }
   }
-  if (!tstate.selected.length) {
-    tstate.chart.clear();
-    tstate.chart.setOption({
-      title: { text: "请搜索并添加产品（可多选、可跨单位）", left: "center", top: "middle",
-               textStyle: { color: CHART.label, fontSize: 13, fontWeight: 400 } },
-    });
-    return;
-  }
-  if (!s || !s.points || !s.points.length) {
-    tstate.chart.clear();
-    tstate.chart.setOption({
-      title: { text: single ? "暂无数据" : "所选产品在该时间范围内暂无历史价格", left: "center", top: "middle",
-               textStyle: { color: CHART.label, fontSize: 13, fontWeight: 400 } },
-    });
-    return;
-  }
-
-  const option = single ? singleOption(s) : multiOption();
-  tstate.chart.setOption(option, true);
+  tstate.charts.clear();
+  tstate.chartEls.clear();
 }
 
-function axisCommon() {
+/* 渲染 N 个独立 chart card */
+function renderCharts() {
+  disposeCharts();
+  const grid = document.getElementById("chart-grid");
+  grid.innerHTML = "";
+  updateChartHead();
+  renderSummary();
+
+  if (!tstate.selected.length) {
+    grid.innerHTML = `<div class="chart-empty-state">请搜索并添加产品（可多选、可跨单位对比）</div>`;
+    return;
+  }
+
+  // 按选择顺序为每个产品创建独立 chart card
+  for (const id of tstate.selected) {
+    const p = tstate.products.find((x) => x.id === id);
+    if (!p) continue;
+    const s = tstate.series.find((x) => x.id === id);
+    const card = document.createElement("div");
+    card.className = "chart-card";
+    card.dataset.id = id;
+    const hasData = s && s.points && s.points.length;
+    const headName = escHtml(p.display_name);
+    const headSpec = p.spec ? `<span class="chart-card-spec">${escHtml(p.spec)}</span>` : "";
+    const headUnit = p.unit ? `<span class="chart-card-unit">${escHtml(p.unit)}</span>` : "";
+    const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
+    const headMetric = `<span class="chart-card-metric">${escHtml(metricNames[tstate.metric] || "日均价")}</span>`;
+    const empty = hasData ? "" : `<div class="chart-card-empty">暂无历史价格</div>`;
+    card.innerHTML = `
+      <div class="chart-card-head">
+        <span class="chart-card-title">${headName}</span>
+        ${headSpec}
+        ${headUnit}
+        ${headMetric}
+      </div>
+      <div class="chart-instance" data-id="${escHtml(id)}"></div>
+      ${empty}
+    `;
+    grid.appendChild(card);
+    const el = card.querySelector(".chart-instance");
+    tstate.chartEls.set(id, el);
+    if (!hasData) continue;
+    const inst = echarts.init(el);
+    tstate.charts.set(id, inst);
+    inst.setOption(buildCardOption(s, p), true);
+  }
+}
+
+/* 单 chart card 配置：min-max 区间带 + 当前指标线，独立 Y 轴 scale: true */
+function buildCardOption(s, p) {
+  const metric = tstate.metric;
+  const dates = s.points.map((pt) => pt.price_date);
+  const bandMin = [], bandDiff = [], metricLine = [];
+  for (const pt of s.points) {
+    const lo = num(pt.min_price), hi = num(pt.max_price),
+          mv = num(pt[metric === "avg" ? "average_price" : metric + "_price"]);
+    bandMin.push(lo ?? null);
+    bandDiff.push(lo !== null && hi !== null ? hi - lo : null);
+    metricLine.push(mv);
+  }
+  const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
   return {
     grid: { left: 12, right: 24, top: 16, bottom: 8, containLabel: true },
     tooltip: {
@@ -381,121 +422,50 @@ function axisCommon() {
         crossStyle: { color: "rgba(100, 116, 139, .5)" },
         label: { backgroundColor: CHART.tipBorder, color: CHART.tipText },
       },
+      formatter: (items) => {
+        if (!items || !items.length) return "";
+        const idx = items[0].dataIndex;
+        const pt = s.points[idx];
+        const chg = changeText(pt.change_value);
+        const row = (k, v) => `<div class="tip-row"><span class="tip-k">${k}</span><span class="tip-v">${v}</span></div>`;
+        return `<div class="chart-tip">
+          <div class="tip-title">${escHtml(p.display_name)} ${escHtml(p.spec || "")}</div>
+          ${row("报价日期", escHtml(pt.price_date))}
+          ${row("最低价", priceText(pt.min_price) + " " + escHtml(pt.unit))}
+          ${row("最高价", priceText(pt.max_price) + " " + escHtml(pt.unit))}
+          ${row("日均价", priceText(pt.average_price) + " " + escHtml(pt.unit))}
+          ${row("涨跌", escHtml(chg.text))}
+          ${p.frequency === "weekly" ? `<div class="tip-note">周报价（按实际发布点）</div>` : ""}
+        </div>`;
+      },
     },
     xAxis: {
       type: "category",
-      boundaryGap: ["5%", "5%"],   // 首尾标签整体内移，不伸出绘图区（防止右端裁切）
-      data: [],                    // 各序列覆盖日期并集（统一时间轴）
+      boundaryGap: ["5%", "5%"],
+      data: dates,
       axisLine: { lineStyle: { color: CHART.axis } },
       axisTick: { show: false },
-      axisLabel: { color: CHART.label, fontSize: 11 },
+      axisLabel: { color: CHART.label, fontSize: 11, formatter: axisDateFormatter() },
     },
     yAxis: {
-      type: "value", scale: true,
+      type: "value", scale: true,     // 关键：每张图独立 Y 轴，按自身数据范围缩放
       splitLine: { lineStyle: { color: CHART.split } },
       axisLine: { show: false },
       axisLabel: { color: CHART.label, fontSize: 11, fontFamily: "monospace" },
     },
+    series: [
+      { name: "最低价", type: "line", data: bandMin, stack: "band",
+        lineStyle: { color: BAND_EDGE, width: 1 }, symbol: "none", silent: true,
+        z: 2, emphasis: { disabled: true } },
+      { name: "区间带（最低—最高价）", type: "line", data: bandDiff, stack: "band",
+        lineStyle: { opacity: 0 }, symbol: "none", silent: true,
+        areaStyle: { color: BAND_FILL }, z: 1, emphasis: { disabled: true } },
+      { name: metricNames[metric], type: "line", data: metricLine,
+        connectNulls: false,
+        lineStyle: { color: BRAND_BLUE, width: 2 },
+        itemStyle: { color: BRAND_BLUE },
+        symbol: "circle", symbolSize: 5,
+        z: 3 },
+    ],
   };
-}
-
-/* 单产品：最低-最高区间带 + 指标曲线（默认日均价） */
-function singleOption(s) {
-  const metric = tstate.metric;
-  const dates = s.points.map((p) => p.price_date);
-  const base = axisCommon();
-  base.xAxis.data = dates;
-  base.xAxis.axisLabel.formatter = axisDateFormatter();
-  const bandMin = [], bandDiff = [], metricLine = [];
-  for (const p of s.points) {
-    const lo = num(p.min_price), hi = num(p.max_price), mv = num(p[metric === "avg" ? "average_price" : metric + "_price"]);
-    bandMin.push(lo ?? null);
-    bandDiff.push(lo !== null && hi !== null ? hi - lo : null);
-    metricLine.push({ value: mv, point: p });
-  }
-  const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
-  base.tooltip.formatter = (items) => {
-    if (!items || !items.length) return "";
-    const idx = items[0].dataIndex;
-    const p = s.points[idx];
-    const chg = changeText(p.change_value);
-    const row = (k, v) => `<div class="tip-row"><span class="tip-k">${k}</span><span class="tip-v">${v}</span></div>`;
-    return `<div class="chart-tip">
-      <div class="tip-title">${escHtml(s.display_name)} ${escHtml(s.spec || "")}</div>
-      ${row("报价日期", escHtml(p.price_date))}
-      ${row("最低价", priceText(p.min_price) + " " + escHtml(p.unit))}
-      ${row("最高价", priceText(p.max_price) + " " + escHtml(p.unit))}
-      ${row("日均价", priceText(p.average_price) + " " + escHtml(p.unit))}
-      ${row("涨跌", escHtml(chg.text))}
-      ${s.frequency === "weekly" ? `<div class="tip-note">周报价（按实际发布点）</div>` : ""}
-    </div>`;
-  };
-  base.series = [
-    { name: "最低价", type: "line", data: bandMin, stack: "band",
-      lineStyle: { color: BAND_EDGE, width: 1 }, symbol: "none", silent: true,
-      z: 2, emphasis: { disabled: true } },
-    { name: "区间带（最低—最高价）", type: "line", data: bandDiff, stack: "band",
-      lineStyle: { opacity: 0 }, symbol: "none", silent: true,
-      areaStyle: { color: BAND_FILL }, z: 1, emphasis: { disabled: true } },
-    { name: metricNames[metric], type: "line", data: metricLine,
-      lineStyle: { color: BRAND_BLUE, width: 2 },
-      itemStyle: { color: BRAND_BLUE },
-      symbol: "circle", symbolSize: 5,
-      z: 3 },
-  ];
-  return base;
-}
-
-/* 多产品对比：统一日期窗口、稳定配色（颜色跟随产品）；不计算综合均价。
-   ≤2 种单位 → 按单位分左右双 Y 轴；>2 种单位 → 单轴并列 + series 名标注单位。 */
-function multiOption() {
-  const allDates = new Set();
-  for (const s of tstate.series) s.points.forEach((p) => allDates.add(p.price_date));
-  const dates = [...allDates].sort();
-  const units = [...new Set(tstate.series.map((s) => s.unit || "").filter(Boolean))];
-  const dual = units.length === 2;
-  const unitIndex = (u) => (dual ? (u === units[0] ? 0 : 1) : 0);
-  const base = axisCommon();
-  base.xAxis.data = dates;
-  base.xAxis.axisLabel.formatter = axisDateFormatter();
-  if (dual) {
-    base.grid.right = 60;
-    base.yAxis = [
-      { ...base.yAxis, name: units[0], nameTextStyle: { color: CHART.label, fontSize: 11 } },
-      { ...base.yAxis, name: units[1], nameTextStyle: { color: CHART.label, fontSize: 11 } },
-    ];
-  }
-  base.tooltip.formatter = (items) => {
-    if (!items || !items.length) return "";
-    const d = items[0].name;
-    const lines = items.map((it) => {
-      const p = it.data.point;
-      return `<div class="tip-row">
-        <span class="tip-k" style="color:${it.color}">● ${escHtml(it.seriesName)}</span>
-        <span class="tip-v">${priceText(p[tstate.metric === "avg" ? "average_price" : tstate.metric + "_price"])} ${escHtml(p.unit)}</span></div>`;
-    }).join("");
-    const note = dual
-      ? `双坐标轴：左轴 ${escHtml(units[0])} · 右轴 ${escHtml(units[1])}`
-      : units.length > 2 ? "所选产品单位超过 2 种，数值不具直接可比性" : `同单位（${escHtml(units[0])}）`;
-    return `<div class="chart-tip">
-      <div class="tip-title">${escHtml(d)}</div>${lines}
-      <div class="tip-note" style="color:var(--ink-3)">${note}</div></div>`;
-  };
-  base.series = tstate.series.map((s) => {
-    const color = colorAt(colorSlot(s.id));
-    const data = dates.map((d) => {
-      const p = s.points.find((x) => x.price_date === d);
-      if (!p) return null;   // 该品种当日缺报 → 断点，不补 0、不插值
-      return { value: num(p[tstate.metric === "avg" ? "average_price" : tstate.metric + "_price"]), point: p };
-    });
-    const unitSuffix = units.length > 2 && s.unit ? `（${s.unit}）` : "";
-    return {
-      name: s.display_name + (s.spec ? `（${s.spec}）` : "") + unitSuffix,
-      type: "line", data, connectNulls: false,
-      yAxisIndex: unitIndex(s.unit || ""),
-      lineStyle: { color, width: 2 }, itemStyle: { color },
-      symbol: "circle", symbolSize: 5,
-    };
-  });
-  return base;
 }
