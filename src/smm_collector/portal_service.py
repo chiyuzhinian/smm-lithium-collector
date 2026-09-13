@@ -822,15 +822,17 @@ def catalog_products(con: sqlite3.Connection) -> dict:
     """GET /api/portal/catalog/products：DB 真实采集产品目录（去重自然键）。
 
     排除 validation_status='invalid' 与 price_date 非 YYYY-MM-DD 格式的脏数据。
+    跨分类重复收录合并为同一条目（与业务映射「同 (product_name, specification, unit) 跨
+    分类只计一次」规则一致）；category 字段取 MIN(category) 提供稳定展示值。
     """
     try:
         rows = con.execute(
-            "SELECT source, category, product_name, specification, unit, "
+            "SELECT MIN(category) AS category, source, product_name, specification, unit, "
             "COUNT(*) AS row_count, MAX(price_date) AS latest_price_date "
             "FROM lithium_spot_prices "
             "WHERE validation_status != 'invalid' "
             "AND price_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' "
-            "GROUP BY source, category, product_name, specification, unit "
+            "GROUP BY source, product_name, specification, unit "
             "ORDER BY category, product_name, specification"
         ).fetchall()
     except sqlite3.Error:
@@ -841,6 +843,8 @@ def catalog_products(con: sqlite3.Connection) -> dict:
     categories: set[str] = set()
     for r in rows:
         d = dict(r)
+        # 跨分类同名同规格产品的 id 必须稳定一致：选取一个固定 category 作为 id 的一部分
+        # 通过先用 ALL 分类查询得到 row_count，再以 MIN(category) 作为展示类目
         cid = catalog_natural_id(d["source"], d["category"], d["product_name"],
                                  d["specification"], d["unit"])
         products.append({
@@ -879,13 +883,14 @@ def catalog_quotes(con: sqlite3.Connection, ids: list[str],
         p = by_id.get(cid)
         if not p:
             continue
+        # 跨分类重复收录合并为同一 catalog id；查询时不限定 category，
+        # 同一 (source, product_name, specification, unit) 任一分类均可
         conds = [
-            "source = ?", "category = ?", "product_name = ?",
-            "specification = ?", "unit = ?",
+            "source = ?", "product_name = ?", "specification = ?", "unit = ?",
             "validation_status != 'invalid'",
             "price_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
         ]
-        params = [p["source"], p["category"], p["product_name"],
+        params = [p["source"], p["product_name"],
                   p["specification"], p["unit"]]
         if as_of:
             conds.append("price_date <= ?")

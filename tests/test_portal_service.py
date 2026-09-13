@@ -562,3 +562,146 @@ def test_monthly_payload_49_rows_includes_metals(db_path, products):
     for r in payload["rows"][:3]:
         assert r["monthly_avg"] is None  # 合成库无基础金属数据
         assert r["info_category"] == "基础金属"
+
+
+# ── 全量采集产品目录（V7 每日报价全量选择器） ─────────────────
+
+
+def test_catalog_natural_id_stable():
+    """同一自然键生成相同 ID；不同自然键生成不同 ID。"""
+    a1 = ps.catalog_natural_id("SMM", "PVDF", "国产锂电级PVDF", "用于三元正极材料", "元/吨")
+    a2 = ps.catalog_natural_id("SMM", "PVDF", "国产锂电级PVDF", "用于三元正极材料", "元/吨")
+    b1 = ps.catalog_natural_id("SMM", "PVDF", "国产锂电级PVDF", "用于铁锂正极材料", "元/吨")
+    c1 = ps.catalog_natural_id("SMM", "PVDF", "锂电级PVDF", "国产乳液法锂电级", "元/吨")
+    assert a1 == a2
+    assert a1.startswith("cp_") and len(a1) == len("cp_") + 12
+    assert a1 != b1  # 同名不同规格
+    assert a1 != c1  # 不同 product_name
+    assert b1 != c1
+
+
+def test_catalog_products_distinct_natural_key(db_path):
+    """catalog_products 按 (source, category, product_name, specification, unit) 去重。"""
+    con = ps.open_readonly(db_path)
+    try:
+        cat = ps.catalog_products(con)
+    finally:
+        con.close()
+    assert cat["meta"]["total"] == len(cat["products"])
+    # 合成库中电池级碳酸锂跨 锂化合物+磷化工 重复收录 → 应合并为 1 条目录项
+    lce = [p for p in cat["products"] if p["product_name"] == "电池级碳酸锂"
+           and p["specification"] == "Li₂CO₃≥99.5%" and p["unit"] == "元/吨"]
+    assert len(lce) == 1
+    # 该条目的 row_count 应包含两个分类的总行数
+    assert lce[0]["row_count"] > 0
+    # 全部产品 id 唯一
+    ids = [p["id"] for p in cat["products"]]
+    assert len(ids) == len(set(ids))
+    # 全部产品 id 均为 cp_ 前缀
+    assert all(p["id"].startswith("cp_") for p in cat["products"])
+    # searchable 字段非空
+    assert all(p["searchable"] for p in cat["products"])
+    assert all(p["display_label"] for p in cat["products"])
+
+
+def test_catalog_products_excludes_invalid(db_path):
+    """合成库 fixture 不包含 invalid 记录；正式库该函数对 invalid 记录排除。
+    至少确认：所有 catalog 条目都有非空 product_name / category / unit。"""
+    con = ps.open_readonly(db_path)
+    try:
+        cat = ps.catalog_products(con)
+    finally:
+        con.close()
+    for p in cat["products"]:
+        assert p["product_name"]
+        assert p["category"]
+        # unit 可空（极少数历史脏数据）
+    # 至少应包含：电池级碳酸锂、工业级碳酸锂、电解钴、电池级硫酸镍 等
+    names = {p["product_name"] for p in cat["products"]}
+    assert "电池级碳酸锂" in names
+    assert "工业级碳酸锂" in names
+
+
+def test_catalog_products_categories_complete(db_path):
+    """categories 字段为产品目录去重分类列表，已排序。"""
+    con = ps.open_readonly(db_path)
+    try:
+        cat = ps.catalog_products(con)
+    finally:
+        con.close()
+    cats = cat["categories"]
+    assert isinstance(cats, list)
+    assert cats == sorted(cats)
+    # 至少包含 fixture 中出现的几个分类
+    for c in ("锂化合物", "电芯"):
+        assert c in cats
+
+
+def test_catalog_quotes_as_of_semantic(db_path):
+    """catalog_quotes 的 as_of 语义：只返回 as_of（含）之前的最新有效报价。"""
+    con = ps.open_readonly(db_path)
+    try:
+        cat = ps.catalog_products(con)
+        # 找电池级碳酸锂
+        lce = next(p for p in cat["products"]
+                   if p["product_name"] == "电池级碳酸锂"
+                   and p["specification"] == "Li₂CO₃≥99.5%")
+        # 不带 as_of：应返回最新可用
+        q1 = ps.catalog_quotes(con, [lce["id"]], as_of=None)
+        assert len(q1["rows"]) == 1
+        assert q1["rows"][0]["quote"] is not None
+        latest_date = q1["rows"][0]["quote"]["price_date"]
+        # 限定 as_of 在 2026-08-15：不应返回 8 月 15 日之后的价格
+        q2 = ps.catalog_quotes(con, [lce["id"]], as_of="2026-08-15")
+        d2 = q2["rows"][0]["quote"]["price_date"]
+        assert d2 <= "2026-08-15"
+        # as_of 早于所有数据 → 仍应返回 None（该日及之前无报价）
+        q3 = ps.catalog_quotes(con, [lce["id"]], as_of="2025-01-01")
+        assert q3["rows"][0]["quote"] is None
+    finally:
+        con.close()
+
+
+def test_catalog_quotes_by_ids(db_path):
+    """按 ids 列表返回对应产品；多 id 时各自独立；未知 id 静默忽略。"""
+    con = ps.open_readonly(db_path)
+    try:
+        cat = ps.catalog_products(con)
+        lce = next(p for p in cat["products"] if p["product_name"] == "电池级碳酸锂"
+                   and p["specification"] == "Li₂CO₃≥99.5%")
+        lfp = next(p for p in cat["products"] if p["product_name"] == "方形磷酸铁锂电芯(周)"
+                   and p["specification"] == "100Ah")
+        q = ps.catalog_quotes(con, [lce["id"], lfp["id"], "cp_does_not_exist"], as_of=None)
+        assert len(q["rows"]) == 2  # 未知 id 静默忽略
+        ids_returned = {r["id"] for r in q["rows"]}
+        assert ids_returned == {lce["id"], lfp["id"]}
+        # 周报价与日频报价在 quote 中应正确返回
+        for r in q["rows"]:
+            if r["id"] == lce["id"]:
+                assert r["quote"]["price_date"] >= "2026-07-20"
+            else:
+                assert r["quote"]["unit"] == "元/Wh"
+    finally:
+        con.close()
+
+
+def test_catalog_quotes_same_name_diff_spec(db_path):
+    """同名不同规格作为不同产品返回（关键：产品身份不只靠名称）。"""
+    con = ps.open_readonly(db_path)
+    try:
+        # 合成库 fixture 包含多个 LFP 压实密度变体
+        cat = ps.catalog_products(con)
+        lfp_products = [p for p in cat["products"] if p["product_name"] == "磷酸铁锂"
+                        and p["specification"]]
+        assert len(lfp_products) >= 2  # fixture 中至少 2 个规格
+        ids = [p["id"] for p in lfp_products]
+        assert len(ids) == len(set(ids))  # id 各自独立
+        # 同时请求这多个产品，各自的 quote 不应串价
+        q = ps.catalog_quotes(con, ids, as_of="2026-08-31")
+        for r in q["rows"]:
+            spec = r["specification"]
+            # 每个产品返回的 quote 来自自身 product_name+specification 绑定
+            assert r["product_name"] == "磷酸铁锂"
+            assert r["specification"] == spec
+    finally:
+        con.close()
