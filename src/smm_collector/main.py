@@ -5,7 +5,7 @@ from datetime import date, datetime
 from pathlib import Path
 from . import __version__
 from .browser import open_browser,close_browser
-from .authentication import looks_logged_out
+from .authentication import looks_logged_out, looks_price_locked
 from .category_navigator import CategoryNavigator,exhaust_page,discover_categories
 from .config import load_config, load_portal_config
 from .database import Database
@@ -43,6 +43,13 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 			await page.screenshot(path=str(diag), full_page=True)
 			(diag.with_suffix(".html")).write_text(await page.content(), encoding="utf-8")
 			raise RuntimeError("登录状态失效")
+		# 2026-09-11 起 SMM 把价格隐藏在登录墙后（表格骨架仍在，价格单元格为 lock 图标）。
+		# looks_logged_out 仅在页面跳登录页时返回 True，此处再抽样价格单元格兜底。
+		if await looks_price_locked(page):
+			diag = cfg.root/"data/screenshots"/f"price_wall_{stamp}.png"
+			await page.screenshot(path=str(diag), full_page=True)
+			(diag.with_suffix(".html")).write_text(await page.content(), encoding="utf-8")
+			raise RuntimeError("检测到价格登录墙：登录态失效，请重新运行 manual_login.py")
 		if cfg.categories_mode == "manual":
 			all_categories = [c for c in cfg.categories_items if not category or c["name"]==category]
 		else:
@@ -92,6 +99,24 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 		ok, failed = await navigator.traverse(one, cfg.settings["collector"]["continue_on_category_failure"])
 		await network.drain()
 		meta["success_categories"] = list(ok); meta["failed_categories"] = list(failed); meta["errors"] = failed
+		# 2026-09-11 起 SMM 把价格隐藏在登录墙后，分类解析可能「成功」（行数齐）但均价全空。
+		# 兜底检测：成功分类中若绝大多数记录的 average_price 都为空，判定登录态失效。
+		if rows:
+			_total = len(rows); _null_avg = sum(1 for r in rows if not r.get("average_price"))
+			_null_ratio = _null_avg / _total if _total else 0
+			if _null_ratio >= 0.8 and _total >= 10:
+				_diag = cfg.root/"data/screenshots"/f"empty_prices_{stamp}.png"
+				try:
+					await page.screenshot(path=str(_diag), full_page=True)
+				except Exception:
+					pass
+				log.error("采集结果大面积空价（%d/%d=%.0f%%），疑似登录态失效", _null_avg, _total, _null_ratio * 100)
+				meta["price_wall_suspected"] = True
+				meta["price_wall_null_ratio"] = round(_null_ratio, 4)
+				_ops_event("PRICE_WALL_SUSPECTED", "error",
+					f"采集大面积空价 null={_null_avg}/{_total}={_null_ratio:.0%}，疑似登录态失效")
+				if cfg.settings["collector"].get("abort_on_price_wall", True):
+					raise RuntimeError(f"大面积空价（{_null_ratio:.0%}），疑似登录态失效，已中止采集")
 	finally:
 		if browser: await close_browser(pw, browser)
 

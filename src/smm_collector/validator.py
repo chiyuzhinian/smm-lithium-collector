@@ -55,6 +55,9 @@ def validate_row(row: dict, target_date: date | None = None) -> dict:
         if not (lo <= avg <= hi):
             warnings.append("平均价不在最低价与最高价之间")
 
+    if avg is None:
+        warnings.append("平均价为空")
+
     # 价格合理性
     for label, val in [("最低价", lo), ("最高价", hi), ("平均价", avg)]:
         if val is None:

@@ -38,6 +38,7 @@ collector:
   continue_on_category_failure: true
   require_all_categories_for_success: true
   max_scroll_attempts: 30
+  abort_on_price_wall: true   # SMM 价格登录墙兜底：≥80% 行均价为空时判定登录态失效并中止
 additional_sources:
   enabled: true                # 是否采集附加数据源
   continue_on_source_failure: true  # 单个源失败不影响其他
