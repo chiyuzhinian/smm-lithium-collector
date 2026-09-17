@@ -16,6 +16,18 @@ output:
   database_path: "data/database/smm_lithium.db"
 browser: {headless: true, timeout_ms: 30000, slow_mo_ms: 0}
 
+# ── SMM Authentication V2 (Phase B/C/D/E) ───────────────────────
+# persistent_profile: false → 旧 storage_state 方案；true → launch_persistent_context
+# 切换前请先完成 Phase A 健康检查 + 阅读 CLAUDE.md 维护说明。
+auth:
+  persistent_profile: false           # Phase B：true=Persistent Context；false=旧 storage_state（默认保持旧行为）
+  profile_dir: "/var/lib/smm-collector/browser-profile"  # Phase B：项目外的 profile 目录（0700）
+  profile_lock_path: "/var/lock/smm-collector-browser.lock"  # Phase D：并发锁路径
+  auto_login_enabled: false            # Phase C：自动账号密码登录开关（true=遇 EXPIRED 尝试一次）
+  auto_login_max_attempts: 1           # Phase C：自动登录最大尝试次数（严格限制）
+  status_file: "/var/lib/smm-collector/auth_status.json"   # Phase E：认证状态持久化
+  status_verbose: true                 # Phase E：在 ops_events 写入认证状态变化
+
 # ── 每日统一数据验证（后台，结果写 logs/validation/，不对外展示） ──
 # 9 层检查：文件/结构/日期/重复/缺失分类/数值/波动/历史连续性/固定汇总一致性
 # 判定：FAIL（每日文件损坏/为空、核心字段缺失、日期完全错误、核心分类全部缺失、

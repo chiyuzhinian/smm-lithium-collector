@@ -4,7 +4,8 @@ import argparse, asyncio, json, uuid, re
 from datetime import date, datetime
 from pathlib import Path
 from . import __version__
-from .browser import open_browser,close_browser
+from .browser import close_browser
+from .browser_v2 import open_browser_smart, close_browser_smart
 from .authentication import looks_logged_out, looks_price_locked
 from .category_navigator import CategoryNavigator,exhaust_page,discover_categories
 from .config import load_config, load_portal_config
@@ -34,7 +35,7 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 	_ops_event("COLLECTOR_STARTED", "info", f"开始采集 target_date={target_date}")
 	rows = []; pw = browser = context = None
 	try:
-		pw, browser, context = await open_browser(cfg, headed)
+		pw, browser, context = await open_browser_smart(cfg, headed)
 		page = await context.new_page()
 		network = NetworkCapture(cfg.root/"data/raw/network"); network.attach(page)
 		await page.goto(cfg.target_url, wait_until="domcontentloaded", timeout=60000)
@@ -118,7 +119,8 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 				if cfg.settings["collector"].get("abort_on_price_wall", True):
 					raise RuntimeError(f"大面积空价（{_null_ratio:.0%}），疑似登录态失效，已中止采集")
 	finally:
-		if browser: await close_browser(pw, browser)
+		if browser is not None or context is not None:
+			await close_browser_smart(pw, browser, context)
 
 	meta["status"] = run_status(expected, meta["success_categories"])
 	meta["finished_at"] = datetime.now().isoformat(timespec="seconds")
@@ -148,7 +150,7 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 	additional_cfg = cfg.additional_sources
 	if additional_cfg.get("enabled",False) and not dry_run:
 		from .additional_sources import collect_source
-		pw2, br2, ctx2 = await open_browser(cfg, headed)
+		pw2, br2, ctx2 = await open_browser_smart(cfg, headed)
 		p2 = await ctx2.new_page()
 		for src_cfg in additional_cfg.get("items",[]):
 			try:
@@ -159,7 +161,7 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 			except Exception as e:
 				log.warning("附加[%s]失败: %s", src_cfg.get("code"), e)
 		meta["additional_sources"] = add_meta
-		await close_browser(pw2, br2)
+		await close_browser_smart(pw2, br2, ctx2)
 
 	meta["total_clean_rows"] = len(rows)
 	# 导出（固定汇总门控用规范分类全集 + 阈值；配置缺失时退化为旧逻辑）
