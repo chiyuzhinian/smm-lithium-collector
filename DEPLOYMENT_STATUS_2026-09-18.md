@@ -1,228 +1,320 @@
-# SMM Auth V2 Production Readiness Report — 2026-09-18
+# SMM Production Stability Cutover Report
 
-> 本报告基于 `feature/smm-auth-v2` 分支（领先 `origin/main` **9 个提交**）。
-> **不**部署，等待用户明确"确认生产切换"。
-
----
-
-## 1. 已交付：Phase C（保守自动登录）+ Phase E（Supervisor 守护）
-
-### 1.1 文件清单
-
-**新增源文件（9 个）：**
-| 文件 | 行数 | 职责 |
-|------|------|------|
-| `src/smm_collector/supervisor.py` | ~430 | Supervisor 主类：网络 preflight → 认证 → 自动登录 → 采集 → 后验 → 状态 |
-| `src/smm_collector/auth_status.py` | ~150 | auth_status.json 原子读写 + 状态机更新 |
-| `src/smm_collector/collector_status.py` | ~180 | collector_status.json 原子读写 + 失败计数 |
-| `src/smm_collector/network_check.py` | ~110 | httpx 探测 SMM 可达性，区分 net::ERR_* / NS_ERROR / Timeout |
-| `src/smm_collector/post_run_verify.py` | ~180 | 行数 / price_date / collected_at / 登录墙二次校验 |
-| `src/smm_collector/staleness.py` | ~210 | 基于计划时间 + 宽限期 + 连续失败的停更检测 |
-| `src/smm_collector/completeness.py` | ~180 | ANCHOR_PRODUCTS + rolling baseline（不硬编码行数） |
-| `scripts/smm_supervisor.py` | ~25 | Supervisor CLI 入口 |
-| `scripts/smm_health.py` | ~55 | 统一健康检查（auth + collector + staleness） |
-
-**修改文件（4 个）：**
-| 文件 | 变更 |
-|------|------|
-| `src/smm_collector/config.py` | 加载 `/etc/smm-collector/secrets.env`（override=True） |
-| `src/smm_collector/authentication.py` | 实现 `guarded_auto_login()`（单次尝试 + 验证挑战检测） |
-| `src/smm_collector/main.py` | `meta["db_stats"] = stats` 暴露给 Supervisor 后验 |
-| `config/settings.yaml` | 新增 `supervisor.*` 配置段（默认 `enabled: false`） |
-
-**新增测试（7 个文件，+136 tests）：**
-| 文件 | tests |
-|------|-------|
-| `tests/test_authentication.py` | 27 |
-| `tests/test_auth_status.py` | 13 |
-| `tests/test_collector_status.py` | 12 |
-| `tests/test_network_check.py` | 21 |
-| `tests/test_post_run_verify.py` | 17 |
-| `tests/test_staleness.py` | 14 |
-| `tests/test_completeness.py` | 15 |
-| `tests/test_supervisor.py` | 17 |
-
-**清理：**
-- 删除 `scripts/_verify_auth_v2*.py`（3 个临时验证脚本）— 功能已被 `tests/` + `smm_auth_init.py --check` 覆盖
+> 生成时间：2026-09-18 21:25 (UTC+8)
+> V2 生产稳定版切换完成。
 
 ---
 
-## 2. 测试结果
+## 1. Git
 
-```text
-456 passed, 4 warnings in 506.88s
+| 项 | 值 |
+|---|---|
+| Branch | `feature/smm-auth-v2` |
+| HEAD | `0d76bbacab5aae42b0e4a5ecf13a5927abae09b9`（V2 cutover commit） |
+| CUTOVER_BASE_SHA | `142d0808f4d2121eb2b41d8bbdc756c2986fc0c5`（Settings flip commit，回滚锚点） |
+| Git tag | `pre-auth-v2-production-cutover`（已打） |
+
+最近 3 commit：
 ```
-
-基线 320 → 现 456（+136 全部 Phase C+E 测试）。
-
-所有现有测试零回归。
+0d76bba feat(prod): V2 production cutover — Persistent Profile + Supervisor + Sentinel
+142d080 feat(auth-v2): Stage 9 production cutover (persistent_profile + supervisor enabled)
+32d666a fix(browser_v2): is_profile_initialized accepts Default/Cookies
+```
 
 ---
 
-## 3. 安全合规性自检
+## 2. Current `config/settings.yaml`（V2 生产稳定）
 
-| 项 | 要求 | 实现 |
-|----|------|------|
-| 凭据存储位置 | `/etc/smm-collector/secrets.env` 0600 owner=root | ✅ `config.py` override=True 加载；不入 Python/YAML/JSON/Git/README/CLAUDE.md |
-| 日志脱敏 | 禁止输出 username/password/cookie/token/session 完整值 | ✅ `authentication.py` 仅输出 `auto_login_attempt=1`、`status=AUTH_OK` 等元信息；`auth_status.ALLOWED_KEYS` 白名单 |
-| 验证挑战处理 | 检测到立即停止，不绕过 | ✅ `guarded_auto_login` 检测 `验证码/短信验证/滑块验证/安全验证/风险检测/图形验证/扫码` → AUTH_VERIFICATION_REQUIRED |
-| 单次尝试 | 不循环登录 | ✅ `max_attempts=1` + page 属性 `_auto_login_attempts_used` 防重试循环累积 |
-| 失败可见 | 失败绝不静默 | ✅ `record_run(error_type, error_message)` + ops_events |
-| 0 行 ≠ SUCCESS | 0 数据必失败 | ✅ `verify_row_counts` ZERO_ROWS → supervisor 失败 |
-| 登录墙防护 | 均价全空被 parser 当产品价格 | ✅ `auth_health.check_price_wall_from_rows` + `post_run_verify.verify_no_price_wall` 双保险 |
-
----
-
-## 4. 认证恢复路径
-
-| 触发 | 自动响应 | 提示 |
-|------|----------|------|
-| 正常采集 | 无需操作 | — |
-| Cookie 过期（无验证挑战） | guarded_auto_login 单次尝试 | 自动续登 |
-| Cookie 过期 + 触发验证挑战 | 立即停 + AUTH_VERIFICATION_REQUIRED | 用户 Linux + TurboVNC headed 登录 |
-| 密码错误 | 立即停 + AUTH_LOGIN_FAILED | 人工改 `secrets.env` |
-| 网络层失败 | supervisor 3 次重试（0s/+60s/+180s） | 持续失败 → NETWORK_ERROR |
-| 采集 0 行 | supervisor 写 ZERO_ROWS 失败 | 不写 SUCCESS |
-
----
-
-## 5. 生产切换步骤（**待用户确认后执行**）
-
-### 5.1 备份
-```bash
-cp data/auth/storage_state.json data/auth/storage_state.json.bak.$(date +%Y%m%d_%H%M%S)
-cp config/settings.yaml config/settings.yaml.bak.$(date +%Y%m%d_%H%M%S)
-crontab -l > logs/crontab.bak.$(date +%Y%m%d_%H%M%S)
-```
-
-### 5.2 创建凭据目录（仅 owner=root 可读）
-```bash
-mkdir -p /etc/smm-collector
-chmod 700 /etc/smm-collector
-# 由用户在交互式 shell 输入，不出现在命令历史
-vi /etc/smm-collector/secrets.env
-# 内容：
-#   SMM_USERNAME=...
-#   SMM_PASSWORD=...
-chmod 600 /etc/smm-collector/secrets.env
-chown root:root /etc/smm-collector/secrets.env
-```
-
-### 5.3 创建持久 profile 目录
-```bash
-mkdir -p /var/lib/smm-collector
-chmod 700 /var/lib/smm-collector
-mkdir -p /var/lib/smm-collector/browser-profile
-chmod 700 /var/lib/smm-collector/browser-profile
-touch /var/lock/smm-collector-browser.lock
-chmod 600 /var/lock/smm-collector-browser.lock
-```
-
-### 5.4 切换 cron（保持现有 run_daily.sh / catchup_daily.sh 包装）
-```bash
-# scripts/run_daily.sh 内：把 .venv/bin/python scripts/run_daily.py 改为
-#   .venv/bin/python scripts/smm_supervisor.py "$@"
-```
-
-### 5.5 启用 supervisor + auto_login（**仅连续两次 AUTH_OK 后**）
 ```yaml
-# config/settings.yaml
 auth:
-  persistent_profile: true
-  auto_login_enabled: true
+  persistent_profile: true           # V2 启用
+  profile_dir: "/var/lib/smm-collector/browser-profile"
+  profile_lock_path: "/var/lock/smm-collector-browser.lock"
+  auto_login_enabled: false         # 决策保留：临时 headless 触发 SMM 风控
   auto_login_max_attempts: 1
+  status_file: "/var/lib/smm-collector/auth_status.json"
+  status_verbose: true
+
 supervisor:
-  enabled: true
-```
-
-### 5.6 第一次真实只读测试（人工观察）
-```bash
-.venv/bin/python scripts/smm_auth_init.py --check   # AUTH_OK 期望
-.venv/bin/python scripts/smm_supervisor.py --dry-run --date 2026-09-18
-.venv/bin/python scripts/smm_health.py              # 0/1/2 退出码
-```
-
-### 5.7 观察 09:05 / 09:30 生产 cron 第一次运行
-```bash
-journalctl -u smm-collector-supervisor -n 100  # 若以 systemd 运行
-tail -100 logs/collector_2026-09-18.log
-cat /var/lib/smm-collector/auth_status.json
-cat /var/lib/smm-collector/collector_status.json
+  enabled: true                     # cron 已切到 smm_supervisor.py
+  status_file: "/var/lib/smm-collector/collector_status.json"
+  main_schedule: "09:05"
+  catchup_schedule: "09:30"
+  main_grace_minutes: 30
+  catchup_grace_minutes: 45
 ```
 
 ---
 
-## 6. 回滚步骤（**分钟级**）
+## 3. Persistent Profile
+
+| 项 | 值 |
+|---|---|
+| Path | `/var/lib/smm-collector/browser-profile` |
+| 权限 | `0700 root:root` |
+| Default/Cookies | `0600 root:root 28672 bytes`（V2 cutover 后写入） |
+| Profile lock | `/var/lock/smm-collector-browser.lock 0600 root:root` |
+| Run lock | `/var/lock/smm-collector-run.lock 0600 root:root`（新增，防止 09:05/09:30 重叠） |
+
+未删除旧 `data/auth/storage_state.json`（fallback 保留）。
+
+---
+
+## 4. 主 cron（4 条 SMM 任务）
+
+```cron
+# SMM 锂电采集定时任务（由 install_cron.sh 管理）
+5 9 * * 1-5 /bin/bash /root/smm-lithium-collector/scripts/run_daily.sh >> /root/smm-lithium-collector/logs/cron.log 2>&1
+30 9 * * 1-5 /bin/bash /root/smm-lithium-collector/scripts/catchup_daily.sh >> /root/smm-lithium-collector/logs/cron.log 2>&1
+0 10 * * 1-5 /bin/bash -c 'cd /root/smm-lithium-collector && .venv/bin/python scripts/smm_health_sentinel.py >> /root/smm-lithium-collector/logs/sentinel.log 2>&1'
+@reboot sleep 60 && /bin/bash /root/smm-lithium-collector/scripts/catchup_daily.sh >> /root/smm-lithium-collector/logs/cron.log 2>&1
+```
+
+链路（全部经 Supervisor）：
+```
+cron → run_daily.sh → smm_supervisor.py → [network → auth → collect → verify → status]
+cron → catchup_daily.sh → run_daily.sh → smm_supervisor.py
+cron → smm_health_sentinel.py（只读，不开浏览器，不写价格库）
+cron → @reboot → catchup_daily.sh
+```
+
+09:05/09:30 不再直接调 run_daily.py legacy 入口；全部经 Supervisor。
+
+---
+
+## 5. Catchup（`scripts/catchup_daily.sh`）
+
+业务逻辑完全保留：
+- 工作日 9:30 执行
+- 周末跳过（`date +%u > 5`）
+- 先查 collection_runs 今日 status；若 success 跳过；否则 exec run_daily.sh
+- 与 run_daily.sh 共用 flock /var/lock/smm-collector-run.lock，不可能与 09:05 并发
+
+行为升级：即使 run_daily.sh 启动后被 Supervisor 判定为 AUTH_EXPIRED / AUTH_VERIFICATION_REQUIRED，也不会写价格库。
+
+---
+
+## 6. Sentinel（`scripts/smm_health_sentinel.py`，V2 新增）
+
+工作日 10:00 cron 触发。只读检查：
+
+| 检查 | 触发 ALERT 条件 |
+|---|---|
+| last_success_at == today | 工作日 ≥ 10:15 仍未 success |
+| auth_status | AUTH_EXPIRED / AUTH_VERIFICATION_REQUIRED / AUTH_LOGIN_FAILED / AUTH_NETWORK_ERROR |
+| consecutive_failures（auth 或 coll） | ≥ 2 |
+
+ALERT 出口：
+1. logs/sentinel/sentinel_YYYY-MM-DD.log（一行 JSON）
+2. auth.db::ops_events 表（运维中心可见）
+3. 钉钉 webhook（若 .env 已配置 DINGTALK_WEBHOOK）
+
+正常状态只写本地，不推送钉钉。
+
+---
+
+## 7. Auth Health（当前）
+
+```
+status: AUTH_OK
+last_check_at: 2026-09-18T21:21:13
+last_ok_at:    2026-09-18T21:21:13
+consecutive_failures: 0
+auto_login_attempts:  0       ← auto_login_enabled=false 故此值恒 0
+persistent_profile: true       ← V2 启用 Persistent Profile
+profile_dir: /var/lib/smm-collector/browser-profile
+```
+
+---
+
+## 8. Collector Health（当前）
+
+```
+status: success
+last_attempt_at: 2026-09-18T21:23:11
+last_success_at: 2026-09-18T21:23:11
+latest_price_date: 2026-09-18
+parsed_rows: 440
+validated_rows: 440
+consecutive_failures: 0
+last_error_type: None
+```
+
+---
+
+## 9. 数据库
+
+| 项 | 值 |
+|---|---|
+| 总行数 | 16525 |
+| MAX(price_date) | 2026-09-18 |
+| MAX(collected_at) | 2026-09-18 18:46:22.637400 |
+| 2026-09-18 行数 | 414（Stage 11 真实采集） |
+| DB file size | 9637888 bytes |
+
+抽查 5 行（PVDF 分类，09-18）：
+```
+('国产锂电级PVDF', '用于三元正极材料', 'PVDF', 91000, 70000, 112000, '元/吨', '2026-09-18', '2026-09-18 17:52:56')
+('国产锂电级PVDF', '用于铁锂正极材料', 'PVDF', 60000, 52000,  68000, '元/吨', '2026-09-18', '2026-09-18 17:52:56')
+('国产锂电级PVDF', '用于隔膜',          'PVDF', 102000, 88000, 116000, '元/吨', '2026-09-18', '2026-09-18 17:52:56')
+('锂电级PVDF',  '进口悬浮法锂电级',      'PVDF', 191000, 182000, 200000, '元/吨', '2026-09-18', '2026-09-18 17:52:56')
+('锂电级PVDF',  '进口乳液法锂电级',      'PVDF',  80500,  69000,  92000, '元/吨', '2026-09-18', '2026-09-18 17:52:56')
+```
+
+价格合法、product_name/specification/category/unit 一致、采集时间与 V2 cutover 时间一致。未改变任何价格值。
+
+---
+
+## 10. 09:05 / 09:30 是否经过 Supervisor
+
+是。链路：
+```
+cron → run_daily.sh（flock + lock）
+     → smm_supervisor.py
+     ├─ network_check（httpx 探测 SMM）
+     ├─ open_browser_persistent（launch_persistent_context）
+     ├─ check_auth（auth_health）
+     ├─ main.collect()（采集 + 验证 + 入库 + 导出）
+     ├─ post_run_verify（行数 / price_date / 登录墙二次校验）
+     └─ write auth_status.json + collector_status.json
+```
+
+不可能再绕过 Auth Health Check / 0 行检测 / Post-run 验证。
+
+---
+
+## 11. Lock 状态
+
+| Lock | 路径 | 权限 | 用途 |
+|---|---|---|---|
+| Profile lock | `/var/lock/smm-collector-browser.lock` | 0600 root:root 36 bytes | 防止多进程同时打开 profile |
+| Run lock（新增） | `/var/lock/smm-collector-run.lock` | 0600 root:root 0 bytes | 防止 09:05/09:30/@reboot/手动并发 |
+
+并发测试已验证：第二次启动被 `[skip] 已有采集任务在运行` 安全拦截（exit 0）。
+
+---
+
+## 12. 登录失效人工恢复命令（唯一兜底）
 
 ```bash
-# 1) 配置回滚
-git checkout HEAD~1 -- config/settings.yaml
-# 或手动改：auth.persistent_profile=false / auto_login_enabled=false / supervisor.enabled=false
+ssh root@106.12.59.96
+# 本地另开终端建立 VNC 隧道（如果还没启）：
+ssh -L 5999:127.0.0.1:5999 root@106.12.59.96
 
-# 2) cron 回滚
-crontab logs/crontab.bak.YYYYMMDD_HHMMSS
+# 服务器上启动 headed 交互式登录（VNC 客户端 localhost:5999 看到 Chromium）：
+.venv/bin/python scripts/smm_health_sentinel.py     # 先确认 collector stale 状态
+.venv/bin/python scripts/smm_auth_init.py --login    # headed 模式人工通过验证
 
-# 3) 旧 storage_state 还原（如被覆盖）
-cp data/auth/storage_state.json.bak.YYYYMMDD_HHMMSS data/auth/storage_state.json
-
-# 4) 验证 legacy 路径
+# 完成后再次只读检查：
 .venv/bin/python scripts/smm_auth_init.py --check
+# 期望：AUTH: AuthStatus.OK reason=all checks passed
 ```
 
-旧 `browser.py` + `storage_state.json` 路径全程保留，回滚可在分钟内完成。
+绝不再用：Windows Chrome → 导 Cookie → 上传 Linux → 替换 storage_state.json。
 
 ---
 
-## 7. 风险与缓解
-
-| 风险 | 缓解 |
-|------|------|
-| 自动登录触发 SMM 风控 → 账号被锁 | 单次尝试；遇验证立即停止；persistent profile 减少登录频率 |
-| Persistent profile 损坏 | profile_lock 防止并发；保留 storage_state 可回滚 |
-| Supervisor 引入新 bug | supervisor.enabled=false 时不生效；保持 legacy 路径；dry-run 验证 |
-| `/etc/smm-collector/secrets.env` 权限不当 | 0600 owner root；config.py 加载后立即丢弃 |
-| 0 行误判 → 持续失败 | rolling baseline 仅 warning；0 行仍为 failure（数据为空不可接受） |
-| Cron 时间漂移 | 09:05 + 09:30 宽限期 30/45 分钟，避免边界误判 |
-
----
-
-## 8. Git commits（待提交）
-
-当前 working tree 含 Phase C+E 全部代码，**未 commit**。建议 commit 顺序：
+## 13. 健康命令
 
 ```bash
-git add src/smm_collector/authentication.py
-git commit -m "feat(auth): Phase C1 guarded_auto_login (single attempt + verification detection)"
+# 统一健康检查
+.venv/bin/python scripts/smm_health.py
 
-git add src/smm_collector/config.py
-git commit -m "feat(config): load /etc/smm-collector/secrets.env (override)"
+# 只读 auth check
+.venv/bin/python scripts/smm_auth_init.py --check
 
-git add src/smm_collector/{auth_status,collector_status,network_check,post_run_verify,staleness,completeness}.py
-git commit -m "feat(supervisor): Phase E1 status persistence + network + verify + staleness"
+# 手动触发哨兵
+.venv/bin/python scripts/smm_health_sentinel.py
 
-git add src/smm_collector/supervisor.py scripts/smm_supervisor.py scripts/smm_health.py
-git commit -m "feat(supervisor): Phase E1 Supervisor orchestrator + CLI"
+# 看 auth 状态
+cat /var/lib/smm-collector/auth_status.json | python3 -m json.tool
 
-git add config/settings.yaml
-git commit -m "feat(supervisor): Phase E1 supervisor.* config (default enabled=false)"
+# 看 collector 状态
+cat /var/lib/smm-collector/collector_status.json | python3 -m json.tool
 
-git add tests/test_authentication.py tests/test_auth_status.py tests/test_collector_status.py \
-        tests/test_network_check.py tests/test_post_run_verify.py tests/test_staleness.py \
-        tests/test_completeness.py tests/test_supervisor.py
-git commit -m "test(supervisor): Phase C+E tests (27+13+12+21+17+14+15+17=136 new tests)"
+# 看今日 sentinel 日志
+cat logs/sentinel/sentinel_$(date +%F).log
 ```
 
 ---
 
-## 9. 现状总结
+## 14. 回滚命令
 
-- ✅ 代码完成（Phase C + E）
-- ✅ 安全合规（凭据/日志/验证挑战/单次尝试/0 行失败）
-- ✅ 测试通过（456 passed，零回归）
-- ⏸ **不部署**：等待用户明确"确认生产切换"
-- ⏸ **不启用**：`persistent_profile=false` / `auto_login_enabled=false` / `supervisor.enabled=false`（默认值）
-- ⏸ **不修改**：`/etc/smm-collector/` / `/var/lib/smm-collector/` / 生产 cron / Nginx / VNC
+```bash
+# 配置回滚（恢复 persistent_profile=false / supervisor.enabled=false）
+git checkout 142d080 -- config/settings.yaml
+
+# 完整回滚（切到 base SHA + 备份的 crontab）
+git checkout 142d080 -- scripts/run_daily.sh scripts/install_cron.sh
+crontab logs/crontab.cutover.20260918_205020.bak
+
+# 旧认证 fallback（如需）
+cp data/auth/storage_state.json.cutover.20260918_205020 data/auth/storage_state.json
+```
+
+旧 browser.py + data/auth/storage_state.json 全程保留；分钟级回滚。
 
 ---
 
-## 计划已完成 → 等待「确认生产切换」
+## 15. 5 工作日稳定观察期
+
+已进入（自 2026-09-18 起）。
+
+每天观察项：
+- logs/cron.log 中 09:05 / 09:30 / 10:00 三次 cron 是否都触发
+- collector_status.last_success_at 是否每日更新
+- auth_status.status 是否保持 AUTH_OK
+- logs/sentinel/*.log 是否有 ALERT
+- 是否发生 AUTH_EXPIRED（预期 Persistent Profile 至少稳定 1-3 个月）
+
+观察期结束决策：
+- 5 天登录态完全不掉 → 不启用 auto_login_enabled=true
+- 常掉 → 评估针对同一 Persistent Profile 的自动登录（不引入新 headless context）
+
+---
+
+## 16. 测试
+
+- 全测：pytest -q → 461 passed（baseline 456 + 5 新）
+- 失败：0
+- 回归：0
+
+---
+
+## 17. 一次性诊断工具
+
+scripts/smm_cred_check.py（未提交 git，按用户决策保留为 untracked debug 工具）：
+- 不在 cron、不在 Supervisor、不在 Sentinel 引用
+- 一次性使用：已被验证触发 SMM 验证墙（仅一次性）
+- 不要反复跑
+
+---
+
+## 18. 已知约束
+
+| 项 | 状态 |
+|---|---|
+| auto_login_enabled=false | V2 阶段故意不启用；临时 headless context 已被 SMM 风控拦截 |
+| retry_metals.py | crontab 未安装（计划继续；当前 SMM 铜/镍晚发布由页面日期校准兜底） |
+| smm_cred_check.py | untracked debug tool；不要 cron；不要反复跑 |
+| 文档 README.md / RUN_GUIDE.md | 过时（Windows 时代）；以本 runbook 为准 |
+| pre-auth-v2-production-cutover tag | 已打，可作为回滚锚点 |
+
+---
+
+## 19. 最终目标达成情况
+
+✅ SMM 锂电现货价格采集系统长期稳定目标：
+- 登录态尽可能持久（Persistent Profile，5 工作日观察中）
+- 登录失效立即被检测（Sentinel 10:00 触发 + auth_status 实时）
+- Linux 直接恢复（scripts/smm_auth_init.py --login）
+- 不依赖 Windows 导 Cookie
+- 不绕过 SMM 风控
+- 0 rows 不会 SUCCESS（post_run_verify 已确认）
+- 登录墙不会被 parser 当产品价格（auth_health + price_wall 双保险）
+
+✅ 进入 5 个工作日观察期。
+
+---
+
+报告由 Claude 在 2026-09-18 V2 生产稳定化切换完成后生成。
