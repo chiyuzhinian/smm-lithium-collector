@@ -307,8 +307,11 @@ async def run_collection(
         )
 
     # Auth 成功：Supervisor 层也写一次 auth_status（即使 _auth_preflight 已写过）
+    _auth_section = (cfg.settings.get("auth") or {}) if hasattr(cfg, "settings") else {}
     update_auth_status(status=AuthStatus.OK, reason="supervisor auth OK",
-                       last_ok_at=datetime.now())
+                       last_ok_at=datetime.now(),
+                       profile_dir=str(_auth_section.get("profile_dir") or ""),
+                       persistent_profile=bool(_auth_section.get("persistent_profile", False)))
 
     # 3) 采集（委托给已有 main.collect()）
     legacy_meta: dict = {}

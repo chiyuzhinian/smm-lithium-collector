@@ -1,0 +1,14 @@
+# SMM Auth V2 生产切换锚点（2026-09-18）
+# 本文件是回滚锚点的永久 Git 记录；DB / Profile 等运行时信息请看 deployment_status_<date>.md
+
+CUTOVER_BASE_SHA = 142d0808f4d2121eb2b41d8bbdc756c2986fc0c5
+CUTOVER_BASE_TS  = 20260918_205020
+BRANCH           = feature/smm-auth-v2
+GIT_TAG          = pre-auth-v2-production-cutover
+
+# 配置快照：
+#   auth.persistent_profile   = true
+#   auth.auto_login_enabled   = false（决策保留：临时 headless context 触发 SMM 风控）
+#   supervisor.enabled        = true
+#
+# Runbook: docs/SMM_AUTH_AND_COLLECTION_RUNBOOK.md

@@ -1,7 +1,8 @@
 # SMM 登录态与价格采集运行维护手册
 
 > 本手册面向运维人员。日常无人值守；只在异常时按步骤操作。
-> 版本：2026-09-18（V2 生产化首版）
+> 版本：**2026-09-18（V2 生产稳定版：Persistent Profile + Supervisor + Sentinel）**
+> CUTOVER_BASE_SHA：`142d0808f4d2121eb2b41d8bbdc756c2986fc0c5`
 
 ---
 
@@ -10,36 +11,47 @@
 让 SMM 锂电现货价格采集系统 **长期稳定运行**，登录态尽量不丢失。
 
 - **数据源**：https://new-energy.smm.cn/new_energy/14042
-- **认证**：Persistent Chromium Profile（每次启动复用同一 profile，Cookie 不丢失）
+- **认证（V2 默认）**：Persistent Chromium Profile（每次启动复用同一 profile，Cookie 不丢失）
 - **日常**：Linux 自动采集；无人值守
-- **普通登录失效**：自动账号密码尝试一次
-- **触发验证挑战**：Linux + TurboVNC + Chromium 人工登录一次
+- **登录失效后人工恢复（V2 唯一通道）**：Linux + TurboVNC + Chromium headed 登录一次
 - **不再使用**：Windows 浏览器登录 → 导出 Cookie → 上传 Linux → 替换 Cookie 文件
+- **`auth.auto_login_enabled = false`**（V2 切换决定）：临时 headless context 会被 SMM 风控拦截，自动登录不作为主恢复路径
+- **5 个工作日观察期**：自 2026-09-18 起监控 cron + sentinel 是否稳定触发；决定 auto_login 后续是否启用
 
 ---
 
 ## 2. 正常运行架构
 
 ```
-Cron (09:05 / 09:30 / @reboot)
+Cron (09:05 / 09:30 / 10:00 sentinel / @reboot)
   ↓
-scripts/run_daily.sh（flock 互斥）
+scripts/run_daily.sh / catchup_daily.sh（/var/lock/smm-collector-run.lock flock）
   ↓
 scripts/smm_supervisor.py
   ↓
 1. Network Check（httpx 探测 SMM 可达性）
-3. Open Browser（Persistent Profile / 或 legacy storage_state）
-4. Auth Health Check（check_auth 综合判定）
+2. Open Browser（Persistent Profile / 或 legacy storage_state）
+3. Auth Health Check（check_auth 综合判定）
    ├─ AUTH_OK → 继续
-   ├─ AUTH_EXPIRED → 触发 Auto Login（单次）
+   ├─ AUTH_EXPIRED → auto_login_enabled=true 时触发 Auto Login（单次）
+   │                 **当前 enabled=false**，直接停 + 写 AUTH_EXPIRED + 提示人工
    ├─ AUTH_VERIFICATION_REQUIRED → 停（提示人工）
    ├─ AUTH_LOGIN_FAILED → 停（提示凭据错）
    └─ AUTH_NETWORK_ERROR → 网络重试
-5. main.collect()（采集 + 解析 + 校验 + 入库）
-6. Post-run Verify（行数 / price_date / 登录墙二次校验）
-7. Export / Validation / MySQL Sync / Notifier
-8. auth_status.json + collector_status.json 原子写
-9. ops_events 记录关键节点
+4. main.collect()（采集 + 解析 + 校验 + 入库）
+5. Post-run Verify（行数 / price_date / 登录墙二次校验）
+6. Export / Validation / MySQL Sync / Notifier
+7. auth_status.json + collector_status.json 原子写
+8. ops_events 记录关键节点
+
+工作日 10:00：
+  ↓
+scripts/smm_health_sentinel.py（**只读**，不打开浏览器、不写价格库）
+  ├─ 读 collector_status + auth_status
+  ├─ 工作日 10:00 后若今日无 last_success_at → COLLECTOR_STALE ALERT
+  ├─ AUTH_*_REQUIRED / *_FAILED / *_ERROR → ALERT
+  ├─ 连续失败 ≥ 2 → ALERT
+  └─ ALERT 时 → ops_events 写入 + 钉钉推送（若 DINGTALK_WEBHOOK 已配置）
 ```
 
 ---
@@ -50,9 +62,10 @@ scripts/smm_supervisor.py
 
 | 任务 | 时间 | 触发 |
 |------|------|------|
-| 主采集 | 工作日 09:05 | cron |
-| 兜底补采 | 工作日 09:30 | cron |
-| 开机补采 | @reboot | cron |
+| 主采集（Supervisor） | 工作日 09:05 | cron → run_daily.sh |
+| 兜底补采（Supervisor） | 工作日 09:30 | cron → catchup_daily.sh（先判 collection_runs，今日未 success 才跑） |
+| **健康哨兵（只读）** | **工作日 10:00** | **cron → smm_health_sentinel.py（V2 新增）** |
+| 开机补采 | @reboot | cron → catchup_daily.sh |
 
 ### 3.2 检查健康状态
 
@@ -93,19 +106,24 @@ next_action: no action needed
 
 ## 5. 登录失效怎么办
 
-### 5.1 自动恢复（无需人工）
+### 5.1 自动恢复（无需人工）— **V2 当前未启用**
 
-普通失效（无验证挑战）：
+> ⚠️ **2026-09-18 V2 切换决策**：`auth.auto_login_enabled = false`
+>
+> 原因：临时 headless context 会被 SMM 风控识别为新浏览器指纹，立即触发验证墙（详见 `scripts/smm_cred_check.py` 实际测试结果）。
+> V2 阶段以 **Persistent Profile** 为主认证手段；自动账号密码登录保留代码但不启用。
+
+若未来 `auto_login_enabled = true`：
 1. 09:05 cron 触发 Supervisor
 2. check_auth 返回 `AUTH_EXPIRED`
-3. Supervisor 自动调用 `guarded_auto_login()`（**仅 1 次**）
+3. Supervisor 自动调用 `guarded_auto_login()`（**仅 1 次**，永不循环）
 4. 用户名密码从 `/etc/smm-collector/secrets.env` 读取
 5. 填表 → 提交 → 等待跳转 → check_auth 复验
 6. 复验 `AUTH_OK` → 继续采集；持久 profile 自动保留新 Cookie
 
-无需任何人工操作。
+但**当前**：AUTH_EXPIRED 时 Supervisor 直接停 + 写 `auth_status.json` + 写 `collector_status.json` + 钉钉告警 + 健康哨兵发现 COLLECTOR_STALE。无需在认证侧做兜底，统一走 §5.2 人工恢复。
 
-### 5.2 人工恢复（验证挑战）
+### 5.2 人工恢复（验证挑战 / AUTH_EXPIRED）
 
 如果系统出现验证码 / 短信验证 / 滑块 / 设备验证 / 风险验证：
 - Supervisor **不会绕过**，立即返回 `AUTH_VERIFICATION_REQUIRED`
@@ -306,5 +324,59 @@ systemctl restart smm-fileserver
 | 看 auth 状态 | `cat /var/lib/smm-collector/auth_status.json \| python3 -m json.tool` |
 | 看 collector 状态 | `cat /var/lib/smm-collector/collector_status.json \| python3 -m json.tool` |
 | 触发 catchup | `bash scripts/catchup_daily.sh` |
+| 触发哨兵（手动） | `.venv/bin/python scripts/smm_health_sentinel.py` |
 | 回滚（配置） | `git checkout HEAD~N -- config/settings.yaml` |
 | 回滚（cron） | `crontab logs/crontab.bak.YYYYMMDD_HHMMSS` |
+
+---
+
+## 13. 外部通知渠道（V2 状态）
+
+| 渠道 | 状态 | 用途 |
+|---|---|---|
+| 钉钉（DingTalk） | ✅ 已配置（`.env` 内的 `DINGTALK_WEBHOOK` / `DINGTALK_SECRET`） | 每日采集完成后推送日报摘要 + Excel 链接；sentinel 异常时推送 ALERT |
+| 邮件 | ❌ 未配置 | — |
+| 企业微信 / 飞书 / Telegram | ❌ 未配置 | — |
+| 站内 Web 运维中心 | ✅ 已存在 | `/admin` 页 ops_events 时间线 |
+
+**sentinel 推送规则**：
+- 仅当 `is_alert=True` 才推送钉钉（节省噪声）
+- 健康状态**只**写本地 `logs/sentinel/*.log` + `ops_events` 表，不推送
+- 若 `DINGTALK_WEBHOOK` 未配置，sentinel 自动降级为「只写本地」
+
+---
+
+## 14. CUTOVER_BASE_SHA 与回滚锚点
+
+| 项 | 值 |
+|---|---|
+| `CUTOVER_BASE_SHA` | `142d0808f4d2121eb2b41d8bbdc756c2986fc0c5`（写入 `CUTOVER_BASE_SHA` 文件） |
+| Git branch | `feature/smm-auth-v2` |
+| Git tag | `pre-auth-v2-production-cutover`（已打） |
+| Backup storage_state | `data/auth/storage_state.json.cutover.20260918_205020` |
+| Backup settings.yaml | `config/settings.yaml.cutover.20260918_205020` |
+| Backup crontab | `logs/crontab.cutover.20260918_205020.bak` |
+
+完整回滚步骤见 §11。
+
+---
+
+## 15. 5 个工作日观察期（2026-09-18 起）
+
+每天观察项：
+- 09:05 是否触发（看 `logs/cron.log`）
+- 09:05 是否成功（看 `collector_status.last_success_at == today`）
+- 09:30 catchup 是否需要触发（看 `catchup_daily.sh` 输出）
+- 10:00 sentinel 输出（看 `logs/sentinel/sentinel_YYYY-MM-DD.log`）
+- Auth 状态（看 `auth_status.json`）
+- 是否发生 AUTH_EXPIRED / 是否需要人工登录
+
+观察结束后决策：
+- 若 5 天登录态完全不掉 → 不启用 `auto_login_enabled`
+- 若常掉 → 进入针对**同一 Persistent Profile** 的自动登录评估
+
+---
+
+## 16. 一次性凭据体检（不要在生产反复跑）
+
+`scripts/smm_cred_check.py`（未提交到生产 git；保留作为诊断工具）会触发 SMM 验证墙（仅一次性使用）。**不要 cron 它、不要反复运行**。如需重新验证，先确认没有别的 SMM 活动。

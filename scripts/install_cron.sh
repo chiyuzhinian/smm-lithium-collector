@@ -29,6 +29,9 @@ MODE="${1:-install}"
 CRON_DAILY="5 9 * * 1-5 /bin/bash ${ROOT}/scripts/run_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
 CRON_RETRY="30 9 * * 1-5 /bin/bash ${ROOT}/scripts/catchup_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
 CRON_REBOOT="@reboot sleep 60 && /bin/bash ${ROOT}/scripts/catchup_daily.sh >> ${ROOT}/logs/cron.log 2>&1"
+# 只读健康哨兵（V2 切换 2026-09-18 新增）：工作日 10:00 检查今日是否成功采集
+# 不开浏览器、不写价格库；异常时通过 ops_events + 钉钉告警
+CRON_SENTINEL="0 10 * * 1-5 /bin/bash -c 'cd ${ROOT} && .venv/bin/python scripts/smm_health_sentinel.py >> ${ROOT}/logs/sentinel.log 2>&1'"
 MARKER="# SMM 锂电采集定时任务（由 install_cron.sh 管理）"
 
 # ── 生成新的 crontab ──────────────────────────────────────────
@@ -38,6 +41,7 @@ gen_crontab() {
     echo "$MARKER"
     echo "$CRON_DAILY"
     echo "$CRON_RETRY"
+    echo "$CRON_SENTINEL"
     echo "$CRON_REBOOT"
 }
 
@@ -45,7 +49,7 @@ gen_crontab() {
 remove_smm_tasks() {
     local tmp
     tmp=$(mktemp)
-    crontab -l 2>/dev/null | grep -v "$MARKER" | grep -v "run_daily.sh" | grep -v "catchup_daily.sh" | grep -v "retry_metals.py" > "$tmp" || true
+    crontab -l 2>/dev/null | grep -v "$MARKER" | grep -v "run_daily.sh" | grep -v "catchup_daily.sh" | grep -v "smm_health_sentinel.py" | grep -v "retry_metals.py" > "$tmp" || true
     if [ -s "$tmp" ]; then
         # 删除末尾多余空行
         sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp" 2>/dev/null || true
