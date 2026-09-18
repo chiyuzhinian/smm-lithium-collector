@@ -80,13 +80,15 @@ def ensure_profile_dir(profile_dir: Path) -> Path:
 def is_profile_initialized(profile_dir: Path) -> bool:
     """判定 profile 是否已初始化（含登录态痕迹）。
 
-    Chromium 在 profile 目录下会创建 ``Default/`` 子目录和 ``Local State``。
-    没有这些文件说明尚未首次启动。
+    Chromium 在 profile 目录下创建 ``Default/`` 子目录（含 ``Cookies`` SQLite DB）
+    是 ``launch_persistent_context`` 必然创建的产物；顶层 ``Local State`` 仅在
+    真实页面访问后才会写。判定以 ``Default/Cookies`` 为主更可靠 —— 即使没有
+    真实页面访问（例如仅 cookie 迁移）也能识别。
     """
     profile_dir = profile_dir.resolve()
     default_dir = profile_dir / "Default"
-    local_state = profile_dir / "Local State"
-    return default_dir.exists() and local_state.exists()
+    cookies_db = default_dir / "Cookies"
+    return default_dir.exists() and cookies_db.exists()
 
 
 # ── 主入口 ──────────────────────────────────────────────────────

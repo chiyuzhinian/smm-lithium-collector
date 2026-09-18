@@ -141,16 +141,31 @@ def test_is_profile_initialized_false(tmp_path):
 
 
 def test_is_profile_initialized_true(tmp_path):
-    """含 Default/ + Local State → 已初始化。"""
+    """含 Default/Cookies → 已初始化（launch_persistent_context 必然产物）。"""
     default_dir = tmp_path / "Default"
     default_dir.mkdir()
+    (default_dir / "Cookies").write_bytes(b"")  # 真实场景是 SQLite
+    assert is_profile_initialized(tmp_path) is True
+
+
+def test_is_profile_initialized_true_with_local_state(tmp_path):
+    """含 Default/Cookies + Local State → 已初始化。"""
+    default_dir = tmp_path / "Default"
+    default_dir.mkdir()
+    (default_dir / "Cookies").write_bytes(b"")
     (tmp_path / "Local State").write_text("{}")
     assert is_profile_initialized(tmp_path) is True
 
 
-def test_is_profile_initialized_partial(tmp_path):
-    """只有 Default 无 Local State → 未初始化（防止误判）。"""
+def test_is_profile_initialized_default_no_cookies(tmp_path):
+    """只有 Default/ 但无 Cookies → 未初始化（防止误判）。"""
     (tmp_path / "Default").mkdir()
+    assert is_profile_initialized(tmp_path) is False
+
+
+def test_is_profile_initialized_default_with_local_state_only(tmp_path):
+    """有 Local State 但 Default/ 无 Cookies → 未初始化（Cookies 是必要标志）。"""
+    (tmp_path / "Local State").write_text("{}")
     assert is_profile_initialized(tmp_path) is False
 
 
@@ -321,5 +336,7 @@ def test_settings_yaml_has_auth_section():
     assert "auth" in cfg
     assert "persistent_profile" in cfg["auth"]
     assert "profile_dir" in cfg["auth"]
-    # 默认 False（旧行为保持）
-    assert cfg["auth"]["persistent_profile"] is False
+    # Stage 9 起启用 persistent_profile（生产切换标记）
+    assert cfg["auth"]["persistent_profile"] is True
+    # auto_login_enabled 必须保持 false（Stage 13 才开；防误开）
+    assert cfg["auth"]["auto_login_enabled"] is False
