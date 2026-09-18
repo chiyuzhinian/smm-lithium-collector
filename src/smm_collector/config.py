@@ -53,7 +53,17 @@ def load_portal_config(root: Path | None = None) -> dict:
 
 def load_config(root: Path | None = None) -> AppConfig:
     root = (root or Path(__file__).resolve().parents[2]).resolve()
+    # Secrets priority:
+    #   1) project .env (dev / test) — loaded normally
+    #   2) /etc/smm-collector/secrets.env (prod) — loaded with override=True so
+    #      production credentials take precedence over any stale project .env.
+    # `/etc/smm-collector/secrets.env` is created by deploy_server.sh / cutover
+    # docs with mode 0600 and is the canonical location for production
+    # credentials. dev/test environments typically do not have this file.
     load_dotenv(root / ".env")
+    _secrets_env = Path("/etc/smm-collector/secrets.env")
+    if _secrets_env.exists():
+        load_dotenv(_secrets_env, override=True)
     with (root / "config/settings.yaml").open(encoding="utf-8") as f:
         settings = yaml.safe_load(f)
     with (root / "config/selectors.yaml").open(encoding="utf-8") as f:
