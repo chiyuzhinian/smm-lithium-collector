@@ -20,10 +20,10 @@ browser: {headless: true, timeout_ms: 30000, slow_mo_ms: 0}
 # persistent_profile: false → 旧 storage_state 方案；true → launch_persistent_context
 # 切换前请先完成 Phase A 健康检查 + 阅读 CLAUDE.md 维护说明。
 auth:
-  persistent_profile: false           # Phase B：true=Persistent Context；false=旧 storage_state（默认保持旧行为）
+  persistent_profile: true            # Phase B：true=Persistent Context；false=旧 storage_state
   profile_dir: "/var/lib/smm-collector/browser-profile"  # Phase B：项目外的 profile 目录（0700）
   profile_lock_path: "/var/lock/smm-collector-browser.lock"  # Phase D：并发锁路径
-  auto_login_enabled: false            # Phase C：自动账号密码登录开关（true=遇 EXPIRED 尝试一次）
+  auto_login_enabled: false            # Phase C：自动账号密码登录开关（**Stage 13 才开**，仍 false）
   auto_login_max_attempts: 1           # Phase C：自动登录最大尝试次数（严格限制）
   status_file: "/var/lib/smm-collector/auth_status.json"   # Phase E：认证状态持久化
   status_verbose: true                 # Phase E：在 ops_events 写入认证状态变化
@@ -32,7 +32,7 @@ auth:
 # Supervisor 负责：网络 preflight → 认证 → 自动登录 → 采集 → 后验 → 状态持久化
 # 切换前必须：连续两次 AUTH_OK + Supervisor dry-run 验证通过
 supervisor:
-  enabled: false                       # Phase E：true=cron 调 smm_supervisor.py；false=旧 main.collect
+  enabled: true                        # Phase E：true=cron 调 smm_supervisor.py；false=旧 main.collect
   status_file: "/var/lib/smm-collector/collector_status.json"  # 采集运行状态
   main_schedule: "09:05"               # 主任务时间
   catchup_schedule: "09:30"            # 兜底任务时间
