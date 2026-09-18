@@ -145,6 +145,7 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 	db = Database(cfg.path("database_path"))
 	stats = {}; add_meta = {}
 	if not dry_run: stats = db.upsert(rows); db.save_run(meta)
+	meta["db_stats"] = stats  # Phase E：Supervisor 后验使用
 
 	# 附加数据源（含延迟重试）
 	additional_cfg = cfg.additional_sources
