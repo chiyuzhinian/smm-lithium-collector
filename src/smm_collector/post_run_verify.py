@@ -59,10 +59,16 @@ def verify_row_counts(
     inserted: int,
     updated: int,
     duplicate: int,
+    *,
+    dry_run: bool = False,
 ) -> PostRunVerifyResult:
     """检查行数合理性。
 
     任何一项不满足即 fail；error_type 用于上层映射到 AuthStatus/CollectorStatus。
+
+    Args:
+        dry_run: ``True`` 时跳过「inserted+updated+duplicate ≈ validated」一致性
+            校验（dry-run 模式 DB 不写，accounted=0 是预期）。
     """
     checks: dict[str, dict[str, Any]] = {}
     checks["row_count_parsed"] = _check("row_count_parsed", parsed_rows > 0,
@@ -79,6 +85,15 @@ def verify_row_counts(
     if validated_rows < parsed_rows * 0.95:
         return PostRunVerifyResult.fail("VALIDATION_FAILED", checks,
                                         f"validated={validated_rows} < 95% of parsed={parsed_rows}")
+
+    if dry_run:
+        # dry-run 模式 DB 不写：accounted 必然为 0，跳过一致性校验
+        checks["row_count_accounted"] = _check(
+            "row_count_accounted", True,
+            inserted=inserted, updated=updated, duplicate=duplicate,
+            validated=validated_rows, skipped_due_to="dry_run",
+        )
+        return PostRunVerifyResult.success(checks)
 
     accounted = inserted + updated + duplicate
     checks["row_count_accounted"] = _check(

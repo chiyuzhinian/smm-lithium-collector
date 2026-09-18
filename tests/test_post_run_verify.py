@@ -56,6 +56,30 @@ def test_verify_accounted_tolerates_small_drift():
     assert r.ok
 
 
+def test_verify_dry_run_skips_account_check():
+    """dry_run=True 时 accounted=0 不算 mismatch（DB 不写）。"""
+    r = verify_row_counts(parsed_rows=440, validated_rows=440,
+                          inserted=0, updated=0, duplicate=0, dry_run=True)
+    assert r.ok
+    assert r.checks["row_count_accounted"]["skipped_due_to"] == "dry_run"
+
+
+def test_verify_dry_run_still_enforces_zero_rows():
+    """dry_run=True 时 parsed_rows=0 仍然失败（与正常模式一致）。"""
+    r = verify_row_counts(parsed_rows=0, validated_rows=0,
+                          inserted=0, updated=0, duplicate=0, dry_run=True)
+    assert not r.ok
+    assert r.error_type == "ZERO_ROWS"
+
+
+def test_verify_dry_run_still_enforces_validation_ratio():
+    """dry_run=True 时 validated < 95% parsed 仍然失败。"""
+    r = verify_row_counts(parsed_rows=100, validated_rows=80,
+                          inserted=0, updated=0, duplicate=0, dry_run=True)
+    assert not r.ok
+    assert r.error_type == "VALIDATION_FAILED"
+
+
 # ── verify_max_price_date ─────────────────────────────────
 
 

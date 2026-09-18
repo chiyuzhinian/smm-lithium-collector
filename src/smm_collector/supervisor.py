@@ -344,7 +344,10 @@ async def run_collection(
     updated = int(db_stats.get("updated", 0) or 0)
     duplicate = int(db_stats.get("duplicate", 0) or 0)
 
-    verify_result = verify_row_counts(parsed_rows, validated_rows, inserted, updated, duplicate)
+    verify_result = verify_row_counts(
+        parsed_rows, validated_rows, inserted, updated, duplicate,
+        dry_run=dry_run,
+    )
     if not verify_result.ok:
         err_checks = verify_result.checks.get(verify_result.error_type or "", {})
         _ops_event("POST_RUN_VERIFY_FAILED", "error",
