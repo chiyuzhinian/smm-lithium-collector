@@ -28,6 +28,21 @@ auth:
   status_file: "/var/lib/smm-collector/auth_status.json"   # Phase E：认证状态持久化
   status_verbose: true                 # Phase E：在 ops_events 写入认证状态变化
 
+# ── SMM Auth V2 Phase E：Supervisor 守护编排 ────────────────────────
+# Supervisor 负责：网络 preflight → 认证 → 自动登录 → 采集 → 后验 → 状态持久化
+# 切换前必须：连续两次 AUTH_OK + Supervisor dry-run 验证通过
+supervisor:
+  enabled: false                       # Phase E：true=cron 调 smm_supervisor.py；false=旧 main.collect
+  status_file: "/var/lib/smm-collector/collector_status.json"  # 采集运行状态
+  main_schedule: "09:05"               # 主任务时间
+  catchup_schedule: "09:30"            # 兜底任务时间
+  main_grace_minutes: 30               # 主宽限期（默认 09:35）
+  catchup_grace_minutes: 45            # 兜底宽限期（默认 10:15）
+  network_retry_delays: [0, 60, 180]   # 网络重试间隔（秒）
+  max_consecutive_failures_alert: 2    # 连续失败阈值（>=2 → CRIT）
+  fresh_max_stale_days: 3              # price_date 新鲜窗口
+  fresh_warn_stale_days: 14            # price_date 陈旧窗口
+
 # ── 每日统一数据验证（后台，结果写 logs/validation/，不对外展示） ──
 # 9 层检查：文件/结构/日期/重复/缺失分类/数值/波动/历史连续性/固定汇总一致性
 # 判定：FAIL（每日文件损坏/为空、核心字段缺失、日期完全错误、核心分类全部缺失、
