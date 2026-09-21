@@ -63,6 +63,12 @@ class Database:
 									now, now))
 							stats["inserted"] += 1
 						elif old[1] == row["record_hash"]:
+							# 数据完全一致：不更新值与 updated_at（保持"数据最后变化时间"语义），
+							# 但刷新 collected_at —— 该报价今天仍被系统在 SMM 页面看到，
+							# 门户"采集更新时间"应反映最近一次采集校验时间。
+							con.execute(
+								"UPDATE lithium_spot_prices SET collected_at=? WHERE id=?",
+								(str(row["collected_at"]), old[0]))
 							stats["duplicate"] += 1
 						elif self._is_worse_quality(con, old[0], row):
 							stats["duplicate"] += 1
