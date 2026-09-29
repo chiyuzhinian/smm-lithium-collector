@@ -105,7 +105,7 @@ cp -a $BACKUP/smm-lithium-collector/data/. /root/smm-lithium-collector/data/
 cp -a $BACKUP/smm-lithium-collector/.env /root/smm-lithium-collector/.env
 chmod 600 /root/smm-lithium-collector/.env
 
-# ⚠️ 必改：.env「文件下载」段的 BASE 地址（旧公网 IP → 新服务器公网 IP）
+# ⚠️ 必改：.env 的 FILE_HOST（旧公网 IP → 新服务器公网 IP，钉钉日报下载链接用它拼 URL）
 vi /root/smm-lithium-collector/.env
 ```
 
@@ -175,7 +175,7 @@ curl -s http://127.0.0.1:8888/health    # 门户健康检查
 
 - **DNS**：`price.ldhs.online` 的 A 记录从 `106.12.59.96` 改指向**新服务器公网 IP**
 - **备案**：域名入口需 ICP 备案（状态见 `DEPLOYMENT_STATUS_2026-08-19.md`）；`ip-access` 是公网 IP 直连临时入口，新 IP 生效后即可访问
-- **钉钉**：webhook 不变；`.env` 下载链接 BASE 改为新 IP 后，日报里的 Excel 链接自动指向新服务器
+- **钉钉**：webhook 不变；`.env` 的 `FILE_HOST` 改为新 IP 后，日报里的 Excel 链接自动指向新服务器
 
 ---
 
@@ -228,7 +228,7 @@ bash scripts/run_daily.sh
    `AUTH_EXPIRED`，需 headed 手动登录或重新初始化 profile（见
    `DEPLOYMENT_STATUS_2026-09-18.md` §3）。
 4. **auth.db 复制**：必须连同 `-wal`/`-shm` 一起复制（或先停服务），否则丢最新会话/事件。
-5. **下载链接 IP**：`.env` 文件下载 BASE 与 nginx `ip-access` 均写死旧 IP，两处都要改。
+5. **下载链接 IP**：`.env` 的 `FILE_HOST` 与 nginx `ip-access` 均写死旧 IP，两处都要改。
 6. **8888 不对外**：门户只经 nginx 转发，安全组只开 80；systemd 沙箱
    （ProtectSystem=strict、NoNewPrivileges）在 deploy 脚本中已配置，恢复 unit 时勿弱化。
 7. **备份包敏感**：含 `.env`/`secrets.env`/`auth.db`（密码哈希），仅存本地与可信服务器。
