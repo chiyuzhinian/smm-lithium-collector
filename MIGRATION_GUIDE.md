@@ -92,20 +92,35 @@ sha256sum -c smm-backup-2026-09-29.sha256
 - 安全组/防火墙：开放 **80**（nginx）；**8888 不直接对外**，仅经 nginx 内网转发
 - 时区：`sudo timedatectl set-timezone Asia/Shanghai`（验证/哨兵按本地时间工作）
 
-### 3.1 获取代码 + 一键部署
+### 3.1 获取代码 + 一键部署（两种方式二选一）
 
 ```bash
+# 方式 A（推荐，保持 git 管理）：GitHub clone
 cd /root
 git clone git@github.com:chiyuzhinian/smm-lithium-collector.git   # 需本机有 GitHub SSH key
 cd smm-lithium-collector
 git checkout feature/server-migration-2026-09-29   # 迁移分支（含本指南与目录改名合并）
 
+# 方式 B（无需 GitHub，直接从备份包部署）：
+#   core 包内就是完整项目源码 + 配置 + data/（除 raw）+ .env，解压即可作为项目目录使用。
+#   代价：无 .git（日后可 git init 重新接 GitHub）。此方式下跳过 §3.2 的「覆盖恢复 data/」。
+cd /root && mkdir -p migration && tar xzf smm-backup-2026-09-29-core.tar.gz -C migration
+mv /root/migration/smm-lithium-collector /root/smm-lithium-collector
+cd /root/smm-lithium-collector
+```
+
+两种方式共同的部署步骤：
+
+```bash
 bash scripts/deploy_server.sh          # 系统依赖 + venv + playwright + systemd 安装
 .venv/bin/playwright install chromium # Chromium 浏览器
 id smmweb                              # 确认门户低权限用户已建（deploy 脚本自动创建）
 ```
 
 ### 3.2 恢复项目数据（从备份包）
+
+> 方式 B 部署时项目目录就是备份解压目录，data/ 与 .env 已就位：跳过「覆盖恢复」，
+> 只需解 raw 包 + 修改 FILE_HOST。
 
 ```bash
 cd /root
