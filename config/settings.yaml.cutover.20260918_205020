@@ -1,0 +1,125 @@
+site:
+  source: "SMM"
+  market: "SMM锂电现货"
+categories:
+  mode: "auto"          # "auto" = 自动发现全部；"manual" = 使用下方 items 列表
+  items:                # mode: "manual" 时的固定分类列表（保留用于测试/特定场景）
+    - {name: "锂金属", code: "lithium_metal"}
+    - {name: "锂矿", code: "lithium_ore"}
+    - {name: "锂化合物", code: "lithium_compound"}
+output:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  export_dir: "data/exports"
+  fixed_export_dir: "data/exports/固定汇总"
+  screenshot_dir: "data/screenshots"
+  database_path: "data/database/smm_lithium.db"
+browser: {headless: true, timeout_ms: 30000, slow_mo_ms: 0}
+
+# ── SMM Authentication V2 (Phase B/C/D/E) ───────────────────────
+# persistent_profile: false → 旧 storage_state 方案；true → launch_persistent_context
+# 切换前请先完成 Phase A 健康检查 + 阅读 CLAUDE.md 维护说明。
+auth:
+  persistent_profile: true            # Phase B：true=Persistent Context；false=旧 storage_state
+  profile_dir: "/var/lib/smm-collector/browser-profile"  # Phase B：项目外的 profile 目录（0700）
+  profile_lock_path: "/var/lock/smm-collector-browser.lock"  # Phase D：并发锁路径
+  auto_login_enabled: false            # Phase C：自动账号密码登录开关（**Stage 13 才开**，仍 false）
+  auto_login_max_attempts: 1           # Phase C：自动登录最大尝试次数（严格限制）
+  status_file: "/var/lib/smm-collector/auth_status.json"   # Phase E：认证状态持久化
+  status_verbose: true                 # Phase E：在 ops_events 写入认证状态变化
+
+# ── SMM Auth V2 Phase E：Supervisor 守护编排 ────────────────────────
+# Supervisor 负责：网络 preflight → 认证 → 自动登录 → 采集 → 后验 → 状态持久化
+# 切换前必须：连续两次 AUTH_OK + Supervisor dry-run 验证通过
+supervisor:
+  enabled: true                        # Phase E：true=cron 调 smm_supervisor.py；false=旧 main.collect
+  status_file: "/var/lib/smm-collector/collector_status.json"  # 采集运行状态
+  main_schedule: "09:05"               # 主任务时间
+  catchup_schedule: "09:30"            # 兜底任务时间
+  main_grace_minutes: 30               # 主宽限期（默认 09:35）
+  catchup_grace_minutes: 45            # 兜底宽限期（默认 10:15）
+  network_retry_delays: [0, 60, 180]   # 网络重试间隔（秒）
+  max_consecutive_failures_alert: 2    # 连续失败阈值（>=2 → CRIT）
+  fresh_max_stale_days: 3              # price_date 新鲜窗口
+  fresh_warn_stale_days: 14            # price_date 陈旧窗口
+
+# ── 每日统一数据验证（后台，结果写 logs/validation/，不对外展示） ──
+# 9 层检查：文件/结构/日期/重复/缺失分类/数值/波动/历史连续性/固定汇总一致性
+# 判定：FAIL（每日文件损坏/为空、核心字段缺失、日期完全错误、核心分类全部缺失、
+#       当日全部行未通过数值校验）；WARNING（其余问题，仅记录不删除数据）
+validation:
+  enabled: true
+  volatility_warning_pct: 20.0   # |日变化| > 20% → warning（仅提示，不拒绝数据）
+  volatility_error_pct: 100.0    # > 100% → 仍只记 warning
+  continuity_window_days: 10     # 历史连续性检查窗口（价格日数）
+  max_report_items: 20           # 每个告警最多记录明细条数
+  log_dir: "logs/validation"     # 验证日志目录（不在 Web 根，不对公网开放）
+  category_overrides: {}         # 按分类覆盖波动阈值，如 {锂化合物: {warning_pct: 15.0}}
+  max_stale_data_days: 14        # 页面数据日期校准上限：页面价格日期早于目标日期超过 N 天视为异常不校准；0=禁用校准
+collector:
+  max_retries: 3
+  retry_base_seconds: 3
+  save_html: true
+  save_screenshot: true
+  prefer_api: true
+  continue_on_category_failure: true
+  require_all_categories_for_success: true
+  max_scroll_attempts: 30
+  abort_on_price_wall: true   # SMM 价格登录墙兜底：≥80% 行均价为空时判定登录态失效并中止
+additional_sources:
+  enabled: true                # 是否采集附加数据源
+  continue_on_source_failure: true  # 单个源失败不影响其他
+  stale_after_days: 5          # 超过N天未更新的报价视为陈旧
+  items:
+    - code: "smm_aluminum"
+      name: "SMM铝现货"
+      source: "SMM"
+      market: "SMM基础金属现货"
+      url: "https://hq.smm.cn/aluminum/category/201102250311"
+      category: "基础金属"
+      selectors:
+        table: ".ant-table table"
+        row: ".ant-table tbody tr"
+      required_products:
+        - canonical_name: "A00铝"
+          aliases: ["A00铝", "SMM A00铝"]
+          material_attribute: "原料"
+          info_category: "金属"
+          chemistry: "铝"
+          unit: "元/吨"
+
+    - code: "smm_copper"
+      name: "SMM铜现货"
+      source: "SMM"
+      market: "SMM基础金属现货"
+      url: "https://hq.smm.cn/copper/category/201102250376"
+      category: "基础金属"
+      retry_after_minutes: 60     # 铜价发布较晚，60分钟后重试
+      selectors:
+        table: ".ant-table table"
+        row: ".ant-table tbody tr"
+      required_products:
+        - canonical_name: "1#电解铜"
+          aliases: ["1#电解铜", "SMM 1#电解铜", "1号电解铜"]
+          material_attribute: "原料"
+          info_category: "金属"
+          chemistry: "铜"
+          unit: "元/吨"
+
+    - code: "smm_nickel"
+      name: "SMM镍现货"
+      source: "SMM"
+      market: "SMM基础金属现货"
+      url: "https://hq.smm.cn/nickel/category/201102250239"
+      category: "基础金属"
+      retry_after_minutes: 60     # 镍价发布较晚，60分钟后重试
+      selectors:
+        table: ".ant-table table"
+        row: ".ant-table tbody tr"
+      required_products:
+        - canonical_name: "1#电解镍"
+          aliases: ["1#电解镍", "SMM 1#电解镍", "1号电解镍"]
+          material_attribute: "原料"
+          info_category: "金属"
+          chemistry: "镍"
+          unit: "元/吨"
