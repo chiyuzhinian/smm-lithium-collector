@@ -38,6 +38,7 @@
 
 - ✅ `DEPLOYMENT_STATUS_2026-08-19.md` — 最新生产部署状态（nginx 入口/公网 IP/ICP 状态）
 - ✅ `DEPLOY.md` / `SERVER_SETUP.md` — 服务器部署手册；`QUERIES.md` — SQL 查询参考
+- ✅ `MIGRATION_GUIDE.md` — 服务器迁移与部署指南（2026-09-29 编制：备份包说明 + 新服务器部署 + 验证清单）
 - ✅ `config/categories_portal.yaml` — 门户+固定汇总门控+重点产品+专题的统一配置（关键文件）
 - ❌ `README.md` / `RUN_GUIDE.md` — **已过时**（Windows/ngrok 时代），勿据此操作
 
