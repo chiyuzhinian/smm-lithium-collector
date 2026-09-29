@@ -30,7 +30,7 @@
 | 每日验证 | 08-31 ~ 09-04 连续 **WARNING**（无 FAIL；WARNING 为周更品种滞后等非致命项） |
 | 门户账号 | huayou（普通）/ admin（管理员），库 `/var/lib/smm-fileserver/auth.db`（PBKDF2-SHA256，0600，Web 不可达） |
 | 钉钉 | 已配置（每日采集完成后推送日报 + Excel 下载链接） |
-| Git 分支 | ⚠️ 服务器部署于 **feature/auth-admin-dashboard**（领先 origin/main **7 个提交**），生产 = 此分支，勿在 main 上操作 |
+| Git 分支 | 生产部署于 **feature/smm-auth-v2**（V2 生产切换 2026-09-18，见 DEPLOYMENT_STATUS_2026-09-18.md）；`main` 落后勿操作；迁移分支 feature/server-migration-2026-09-29（含 MIGRATION_GUIDE.md） |
 | 测试 | **253 passed**（pytest；含 portal_service/monthly_report 及 V5 dataset 多分类/基础金属测试） |
 | 门户重构 | ✅ V3 深色（09-06 晚）/V4 回归修复（09-07）已部署；**2026-09-09 V5 业务升级 + V6 修复优化已开发并 8899 预览验收（234 项浏览器断言全过、pytest 253），生产 8888 待用户确认重启**；详见 `DEPLOYMENT_STATUS_2026-09-09.md` |
 

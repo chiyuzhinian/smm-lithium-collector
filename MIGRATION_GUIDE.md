@@ -2,7 +2,9 @@
 
 > 编制：2026-09-29（UTC+8）
 > 背景：旧服务器（公网 IP **106.12.59.96**，Ubuntu）**2026-09-30 到期**，需在新服务器完整重建。
-> 本指南配套备份包：**`/root/smm-backup-2026-09-29.tar.gz`**（含系统 + 数据，单文件下载）。
+> 本指南配套备份包（旧服务器 `/root/` 下，SHA256 见 `smm-backup-2026-09-29.sha256`）：
+> - `smm-backup-2026-09-29-core.tar.gz`（~120M，核心：项目+系统状态+MySQL dump，**必下**）
+> - `smm-backup-2026-09-29-raw.tar.gz`（~3G，可选：data/raw 原始采集存档）
 
 ---
 
@@ -40,29 +42,41 @@
 
 ## 2. 备份包内容与下载
 
-**旧服务器路径**：`/root/smm-backup-2026-09-29.tar.gz`
+**旧服务器路径**（两个文件，按需下载）：
+
+| 文件 | 大小 | 内容 |
+|------|------|------|
+| `/root/smm-backup-2026-09-29-core.tar.gz` | ~120M | 项目目录（data/ 除 raw）+ 系统级状态 + MySQL dump |
+| `/root/smm-backup-2026-09-29-raw.tar.gz` | ~3G | `data/raw/` 原始采集存档（HTML/JSON/PNG 截图，诊断用） |
+| `/root/smm-backup-2026-09-29.sha256` | - | 两个文件的 SHA256 校验值 |
+
+core 包结构：
 
 ```
-smm-backup-2026-09-29/
-├── smm-lithium-collector/        # 完整项目目录（含 data/ logs/ config/ .env）
-│   │                            # 不含 .venv（新服务器重建）与 .git（从 GitHub clone）
-├── system-state/
-│   ├── etc-smm-collector/        # secrets.env
-│   ├── var-lib-smm-collector/    # browser-profile + 状态文件
-│   ├── var-lib-smm-fileserver/   # auth.db（含 -wal/-shm）
-│   ├── smm-fileserver.service    # systemd 单元
-│   └── nginx-sites-enabled/      # 两个站点配置
-└── mysql/
-    └── smm_lithium.sql           # mysqldump 全量导出
+smm-lithium-collector/        # 完整项目目录（含 data/ logs/ config/ .env）
+│                            # 不含 .venv（新服务器重建）与 .git（从 GitHub clone）
+│                            # 不含 data/raw（见 raw 包）
+system-state/
+├── etc-smm-collector/        # secrets.env
+├── var-lib-smm-collector/    # browser-profile + 状态文件
+├── var-lib-smm-fileserver/   # auth.db（含 -wal/-shm）
+├── smm-fileserver.service    # systemd 单元
+└── nginx-sites-enabled/      # 两个站点配置
+mysql/
+└── smm_lithium.sql           # mysqldump 全量导出（13.9M）
 ```
+
+raw 包结构：`data/raw/`（解压时直接放入项目根目录即可）。
 
 **从本地电脑下载（服务器到期前务必完成）：**
 
 ```bash
 # 本地执行（Windows PowerShell / Linux / macOS 均可）
-scp root@106.12.59.96:/root/smm-backup-2026-09-29.tar.gz .
+scp root@106.12.59.96:/root/smm-backup-2026-09-29-core.tar.gz .
+scp root@106.12.59.96:/root/smm-backup-2026-09-29-raw.tar.gz .    # 可选，带宽/时间允许再下
+scp root@106.12.59.96:/root/smm-backup-2026-09-29.sha256 .
 # 校验
-sha256sum smm-backup-2026-09-29.tar.gz   # 与旧服务器 /root/smm-backup-2026-09-29.tar.gz.sha256 比对
+sha256sum -c smm-backup-2026-09-29.sha256
 ```
 
 > ⚠️ 备份包含 `.env` 与 `secrets.env`（账号密码、钉钉 webhook），请妥善保存，勿外传。
@@ -95,11 +109,15 @@ id smmweb                              # 确认门户低权限用户已建（dep
 
 ```bash
 cd /root
-tar xzf smm-backup-2026-09-29.tar.gz
-BACKUP=/root/smm-backup-2026-09-29
+mkdir -p /root/migration
+tar xzf smm-backup-2026-09-29-core.tar.gz -C /root/migration   # 解到中转目录，避免覆盖 clone 的项目
+BACKUP=/root/migration
 
 # 覆盖恢复 data/ 与 logs/（核心：SQLite 库 + 导出报表 + 登录态 fallback）
 cp -a $BACKUP/smm-lithium-collector/data/. /root/smm-lithium-collector/data/
+
+# raw 原始存档（可选，有 raw 包时）
+# tar xzf smm-backup-2026-09-29-raw.tar.gz -C /root/smm-lithium-collector   # 产生 data/raw
 
 # .env（含密钥；注意权限 600）
 cp -a $BACKUP/smm-lithium-collector/.env /root/smm-lithium-collector/.env
