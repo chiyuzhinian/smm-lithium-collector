@@ -705,3 +705,87 @@ def test_catalog_quotes_same_name_diff_spec(db_path):
             assert r["specification"] == spec
     finally:
         con.close()
+
+
+# ── 全量目录改名合并（catalog_renames）────────────────────────
+
+def _catalog_db(tmp_path):
+    """独立小库：仅 catalog 相关列（改名合并测试用）。"""
+    con = sqlite3.connect(tmp_path / "catalog.db")
+    con.row_factory = sqlite3.Row
+    con.execute("""CREATE TABLE lithium_spot_prices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT, market TEXT, category TEXT, product_name TEXT, specification TEXT DEFAULT '',
+      min_price TEXT, max_price TEXT, average_price TEXT, change_value TEXT, unit TEXT DEFAULT '',
+      price_date TEXT, collected_at TEXT, source_url TEXT, collection_method TEXT, raw_text TEXT,
+      extra_fields TEXT, record_hash TEXT, validation_status TEXT, validation_message TEXT,
+      created_at TEXT, updated_at TEXT)""")
+    return con
+
+
+def _ins(con, category, name, spec, unit, pd, avg, source="SMM锂电现货"):
+    con.execute("""INSERT INTO lithium_spot_prices
+      (source, category, product_name, specification, unit, price_date, collected_at,
+       average_price, record_hash, validation_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'valid')""",
+      (source, category, name, spec, unit, pd, f"{pd}T09:05:00", str(avg),
+       f"h-{category}-{name}-{spec}-{pd}"))
+    con.commit()
+
+
+RENAME_PAIR = {"old": {"product_name": "六氟磷酸锂（国产）", "specification": "LiPF₆≥99.95%"},
+               "new": {"product_name": "六氟磷酸锂", "specification": "LiPF₆≥99.95%，中国产"}}
+
+
+def test_catalog_rename_merge(tmp_path):
+    """旧名条目合并进新名：目录只剩新名、最新日期取最大、row_count 相加、旧 id 记 aliases。"""
+    con = _catalog_db(tmp_path)
+    _ins(con, "磷化工", "六氟磷酸锂（国产）", "LiPF₆≥99.95%", "元/吨", "2026-09-17", 50000)
+    _ins(con, "磷化工", "六氟磷酸锂（国产）", "LiPF₆≥99.95%", "元/吨", "2026-09-18", 51000)
+    _ins(con, "磷化工", "六氟磷酸锂", "LiPF₆≥99.95%，中国产", "元/吨", "2026-09-21", 52000)
+    cat = ps.catalog_products(con, renames=[RENAME_PAIR])
+    names = [p["product_name"] for p in cat["products"]]
+    assert "六氟磷酸锂（国产）" not in names
+    merged = next(p for p in cat["products"] if p["product_name"] == "六氟磷酸锂")
+    assert merged["latest_price_date"] == "2026-09-21"
+    assert merged["row_count"] == 3
+    old_id = ps.catalog_natural_id("SMM锂电现货", "磷化工", "六氟磷酸锂（国产）",
+                                   "LiPF₆≥99.95%", "元/吨")
+    assert cat["aliases"][old_id] == merged["id"]
+    con.close()
+
+
+def test_catalog_quotes_resolves_rename_alias(tmp_path):
+    """已选旧 id 经 aliases 解析到新条目：返回新名 + 最新报价（历史不中断）。"""
+    con = _catalog_db(tmp_path)
+    _ins(con, "磷化工", "六氟磷酸锂（国产）", "LiPF₆≥99.95%", "元/吨", "2026-09-18", 51000)
+    _ins(con, "磷化工", "六氟磷酸锂", "LiPF₆≥99.95%，中国产", "元/吨", "2026-09-21", 52000)
+    old_id = ps.catalog_natural_id("SMM锂电现货", "磷化工", "六氟磷酸锂（国产）",
+                                   "LiPF₆≥99.95%", "元/吨")
+    q = ps.catalog_quotes(con, [old_id])
+    assert len(q["rows"]) == 1
+    row = q["rows"][0]
+    assert row["product_name"] == "六氟磷酸锂"
+    assert row["quote"]["price_date"] == "2026-09-21"
+    con.close()
+
+
+def test_catalog_rename_unit_mismatch_skipped(tmp_path):
+    """新旧 unit 不一致视为不同品种：不合并、无 aliases。"""
+    con = _catalog_db(tmp_path)
+    _ins(con, "磷化工", "六氟磷酸锂（国产）", "LiPF₆≥99.95%", "元/吨", "2026-09-18", 51000)
+    _ins(con, "磷化工", "六氟磷酸锂", "LiPF₆≥99.95%，中国产", "美元/吨", "2026-09-21", 52000)
+    cat = ps.catalog_products(con, renames=[RENAME_PAIR])
+    assert len(cat["products"]) == 2
+    assert cat["aliases"] == {}
+    con.close()
+
+
+def test_catalog_rename_missing_new_ignored(tmp_path):
+    """新名条目不存在时保持旧名不变（改名对无效，静默跳过）。"""
+    con = _catalog_db(tmp_path)
+    _ins(con, "磷化工", "六氟磷酸锂（国产）", "LiPF₆≥99.95%", "元/吨", "2026-09-18", 51000)
+    cat = ps.catalog_products(con, renames=[RENAME_PAIR])
+    assert [p["product_name"] for p in cat["products"]] == ["六氟磷酸锂（国产）"]
+    assert cat["aliases"] == {}
+    con.close()

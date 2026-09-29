@@ -56,6 +56,10 @@ async function init() {
     qstate.catalog = catData.products || [];
     qstate.catalogById = {};
     for (const p of qstate.catalog) qstate.catalogById[p.id] = p;
+    // 改名合并：旧 id 的 chips/标签解析到新条目（catalog/quotes 服务端同规则）
+    for (const [oldId, newId] of Object.entries(catData.aliases || {})) {
+      if (qstate.catalogById[newId]) qstate.catalogById[oldId] = qstate.catalogById[newId];
+    }
     // 同步分类下拉为全量分类（首次加载完成后再切换标签提示）
     fillCatalogSelect(catData.categories || []);
     document.getElementById("prod-suggest-counter").textContent =

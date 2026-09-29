@@ -71,6 +71,7 @@
 │   ├── selectors.yaml           # SMM 页面选择器（section 模式，分类名选择器已确认）
 │   ├── categories_portal.yaml   # 门户与门控统一配置：40 规范分类/A-F分组/12指标卡/
 │   │                            #   20重点产品(db三元组)/4专题/账号阈值/健康阈值/日志白名单
+│   │                            #   catalog_renames=全量目录改名合并(旧三元组→新三元组)
 │   ├── business_products.yaml   # ⭐ 业务品种→DB报价系列映射（49行：40 SMM + 9 非SMM）
 │   │                            #   稳定ID/组织/属性/类别/精确三元组/别名/映射状态与依据
 │   │                            #   首页/走势/月报共用（2026-09-06 门户重构核心）
@@ -254,7 +255,8 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
   - `/quality` `/admin`（仅 admin） `/login` `/register` `/account` `/403`
 - API：`/api/latest` `/api/overview` `/api/categories` `/api/files` `/api/history` `/api/trends`
   `/api/stats` `/api/topics` `/api/quality` `/api/key-products[/history]`
-  **`/api/portal/*`**(products/quotes/history/monthly/monthly/download/dataset/*，登录即可)
+  **`/api/portal/*`**(products/quotes/history/monthly/monthly/download/dataset/*
+  catalog/products(491全量目录，含 aliases 改名合并)/catalog/quotes，登录即可)
   `/api/auth/*`(login/logout/me/csrf/register/change-password)
   `/api/admin/*`(overview/users/logs/tasks/events/errors/data-quality/audit)
   `/health`
@@ -350,7 +352,8 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 2. **日期口径**：MySQL 同步/验证/门控一律用校准后 `data_date`，不是 `target_date`
 3. **升贴水表**：金属页面附加表已排除（0779491）；新增附加源时注意过滤非价格表
 4. **产品规格改名**：SMM 曾把「压实密度」改为「粉体压实密度」——categories_portal.yaml 的
-   key_products `db` 是列表，改名时追加三元组即可合并不产生断档
+   key_products `db` 是列表，改名时追加三元组即可合并不产生断档；全量目录(491)层改名
+   合并用同文件 `catalog_renames`（旧三元组→新三元组，精确匹配+同 unit，改后重启门户）
 5. **重点产品身份**：(category, product_name, specification) 精确匹配，绝不用模糊名称匹配；
    同产品双分类收录靠 `db[].category` 钉死
 6. **固定汇总门控**：PACK 缺失等分类不全时会写临时快照而非正式文件——这是机制不是 bug

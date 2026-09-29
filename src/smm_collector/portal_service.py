@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import sqlite3
 from datetime import date, datetime, timedelta
@@ -818,12 +819,56 @@ def _catalog_searchable(p: dict) -> str:
     return " ".join(parts).lower()
 
 
-def catalog_products(con: sqlite3.Connection) -> dict:
+def load_catalog_renames(config_root: Path | str | None = None) -> list[dict]:
+    """加载全量目录改名合并对（config/categories_portal.yaml 的 catalog_renames）。
+
+    仅保留 old/new 的 (product_name, specification) 齐全的条目；配置缺失或损坏返回 []，
+    目录照常工作（改名合并只是附加修正）。改名是 SMM 页面侧行为，改配置后需重启门户生效。
+    """
+    root = Path(config_root) if config_root else Path(__file__).resolve().parents[2] / "config"
+    path = root / "categories_portal.yaml"
+    try:
+        with path.open(encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception:  # noqa: BLE001 — 目录功能不应因附加配置失败
+        return []
+    out: list[dict] = []
+    for item in cfg.get("catalog_renames") or []:
+        if not isinstance(item, dict):
+            continue
+        old, new = item.get("old"), item.get("new")
+        if not (isinstance(old, dict) and isinstance(new, dict)):
+            continue
+        if not (old.get("product_name") and new.get("product_name")
+                and old.get("specification") is not None and new.get("specification") is not None):
+            continue
+        out.append({
+            "old": {"product_name": str(old["product_name"]),
+                    "specification": str(old["specification"])},
+            "new": {"product_name": str(new["product_name"]),
+                    "specification": str(new["specification"])},
+            "note": str(item.get("note") or ""),
+        })
+    return out
+
+
+@functools.lru_cache(maxsize=1)
+def _catalog_renames_default() -> tuple:
+    """进程内缓存的默认改名对（配置改动需重启门户，与静态配置语义一致）。"""
+    return tuple(load_catalog_renames())
+
+
+def catalog_products(con: sqlite3.Connection, renames: list[dict] | None = None) -> dict:
     """GET /api/portal/catalog/products：DB 真实采集产品目录（去重自然键）。
 
     排除 validation_status='invalid' 与 price_date 非 YYYY-MM-DD 格式的脏数据。
     跨分类重复收录合并为同一条目（与业务映射「同 (product_name, specification, unit) 跨
     分类只计一次」规则一致）；category 字段取 MIN(category) 提供稳定展示值。
+
+    renames（默认读 catalog_renames 配置）：SMM 页面改名后旧名条目冻结在改名日，
+    按 (product_name, specification) 精确三元组 + 相同 unit 合并到新名条目（历史拼接、
+    最新日期取最大、row_count 相加），旧名不再单独出现在目录；旧 id → 新 id 记入
+    返回 payload 的 aliases，catalog_quotes 可据此解析已选旧 id。
     """
     try:
         rows = con.execute(
@@ -860,11 +905,44 @@ def catalog_products(con: sqlite3.Connection) -> dict:
             "row_count": d["row_count"],
         })
         categories.add(d["category"])
+    # ── 改名合并（目录层）：旧名条目并入新名条目，旧 id 记入 aliases ──
+    if renames is None:
+        renames = list(_catalog_renames_default())
+    aliases: dict[str, str] = {}
+    if renames:
+        by_key = {(p["source"], p["product_name"], p["specification"], p["unit"]): p
+                  for p in products}
+        for pair in renames:
+            old, new = pair["old"], pair["new"]
+            old_entries = [p for p in products
+                           if p["product_name"] == old["product_name"]
+                           and p["specification"] == old["specification"]]
+            for op in old_entries:
+                np_ = by_key.get((op["source"], new["product_name"],
+                                  new["specification"], op["unit"]))
+                if not np_ or np_ is op:
+                    continue  # 新名不存在或 unit 不一致（视为不同品种），跳过
+                np_["latest_price_date"] = max(np_["latest_price_date"] or "",
+                                               op["latest_price_date"] or "")
+                np_["row_count"] += op["row_count"]
+                aliases[op["id"]] = np_["id"]
+        if aliases:
+            # 改名链（A→B→C）收敛到最终条目；被合并的旧条目从目录移除
+            merged_ids = set(aliases)
+            for old_id, new_id in aliases.items():
+                seen = {old_id}
+                while new_id in aliases and new_id not in seen:
+                    seen.add(new_id)
+                    new_id = aliases[new_id]
+                aliases[old_id] = new_id
+            products = [p for p in products if p["id"] not in merged_ids]
+            categories = {p["category"] for p in products}
     return {
         "meta": {"generated_at": datetime.now().isoformat(timespec="seconds"),
                  "source": "sqlite", "total": len(products)},
         "products": products,
         "categories": sorted(categories),
+        "aliases": aliases,
     }
 
 
@@ -875,11 +953,17 @@ def catalog_quotes(con: sqlite3.Connection, ids: list[str],
     as_of 语义：含该日及更早的最近一条有效报价（与 /api/portal/quotes 一致）；
     未指定 as_of = 最新可用报价；绝不含 as_of 之后的价格。
     未知 id 静默忽略；空 ids 返回空 rows。
+    改名合并后旧 id 经 aliases 解析到新条目（返回新 id/新名，历史不中断）。
     """
     cat = catalog_products(con)
     by_id = {p["id"]: p for p in cat["products"]}
+    aliases = cat.get("aliases") or {}
     rows_out = []
     for cid in ids:
+        seen = set()
+        while cid in aliases and cid not in seen:
+            seen.add(cid)
+            cid = aliases[cid]
         p = by_id.get(cid)
         if not p:
             continue

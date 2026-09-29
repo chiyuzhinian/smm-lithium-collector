@@ -288,3 +288,22 @@ tasks:
   - {key: validation,    name: "数据验证",             cron: "",               source: validation_log}
   - {key: fixed_summary, name: "固定汇总更新",         cron: "",               source: fixed_summary}
   - {key: mysql_sync,    name: "MySQL 同步",           cron: "",               source: quality_sync}
+
+# ── 全量目录改名合并（491 全量产品；SMM 页面改名后旧名条目冻结在改名日） ──
+# 旧三元组 (product_name, specification) 精确匹配后合并到新三元组：
+#   历史拼接、最新报价日期取最大、旧名不再单独出现在目录；
+# 与业务映射 series 追加三元组的改名处理互为补充（目录层通用、无需 49 行映射）。
+# 匹配键 = (source, product_name, specification, unit)，unit 不一致时跳过（视为不同品种）。
+catalog_renames:
+  - old: {product_name: "六氟磷酸锂（国产）", specification: "LiPF₆≥99.95%"}
+    new: {product_name: "六氟磷酸锂", specification: "LiPF₆≥99.95%，中国产"}
+    note: "2026-09-21 SMM 改名（磷化工/锂化合物双分类同步）"
+  - old: {product_name: "国产锂电级PVDF", specification: "用于三元正极材料"}
+    new: {product_name: "锂电级PVDF", specification: "用于三元正极材料，中国产"}
+    note: "2026-09-21 SMM 改名"
+  - old: {product_name: "国产锂电级PVDF", specification: "用于铁锂正极材料"}
+    new: {product_name: "锂电级PVDF", specification: "用于铁锂正极材料，中国产"}
+    note: "2026-09-21 SMM 改名"
+  - old: {product_name: "国产锂电级PVDF", specification: "用于隔膜"}
+    new: {product_name: "锂电级PVDF", specification: "用于隔膜，中国产"}
+    note: "2026-09-21 SMM 改名"
