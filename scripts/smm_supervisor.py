@@ -9,8 +9,8 @@ from pathlib import Path
 
 # 让 scripts/ 能 import src/smm_collector/
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
 
 from smm_collector.supervisor import main  # noqa: E402
 

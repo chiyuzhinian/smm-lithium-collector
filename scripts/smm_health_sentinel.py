@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 # 让 DINGTALK_WEBHOOK / DINGTALK_SECRET 可被读到（cron 不自动加载 .env）
 env_file = ROOT / ".env"

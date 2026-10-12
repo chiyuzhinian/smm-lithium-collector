@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 
 # 项目根（脚本位于 scripts/ 下）
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 # ── 读 secrets.env（不读 .env；只看 /etc/smm-collector/）───────────────
 SECRETS_FILE = "/etc/smm-collector/secrets.env"

@@ -7,8 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
 
 from smm_collector.auth_status import DEFAULT_PATH as AUTH_PATH
 from smm_collector.auth_status import read as read_auth_status
