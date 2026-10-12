@@ -48,6 +48,9 @@ except ImportError:  # 系统 python 无 PyYAML 时门户配置退化
 # ── 配置 ────────────────────────────────────────────────
 
 PORT = int(os.getenv("FILE_SERVER_PORT", "8888"))
+# 绑定地址：默认仅本机回环（公网一律经 nginx 80 代理；8888 不直接对外）。
+# 本地开发/调试需直连时可用环境变量覆盖（如 FILE_SERVER_BIND=0.0.0.0）。
+BIND_HOST = os.getenv("FILE_SERVER_BIND", "127.0.0.1").strip() or "127.0.0.1"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPORTS_ROOT = PROJECT_ROOT / "data" / "exports"
 # 静态目录可用环境变量覆盖（开发预览用；生产默认 static/）
@@ -2152,10 +2155,10 @@ if __name__ == "__main__":
             "请先运行 scripts/init_auth.py 初始化账号，"
             "并确认 systemd 单元已配置 StateDirectory=smm-fileserver。")
 
-    with ReusableThreadingTCPServer(("0.0.0.0", PORT), DataCenterHandler) as httpd:
+    with ReusableThreadingTCPServer((BIND_HOST, PORT), DataCenterHandler) as httpd:
         # flush=True：stdout 非 TTY 时是块缓冲，不 flush 日志里看不到启动横幅
         print("锂电价格与回收业务数据中心已启动", flush=True)
-        print(f"  地址: http://0.0.0.0:{PORT}", flush=True)
+        print(f"  地址: http://{BIND_HOST}:{PORT}", flush=True)
         print(f"  数据根目录: {EXPORTS_ROOT}", flush=True)
         print(f"  鉴权: 表单登录 + 服务端 Session（账号库: {AUTH_DB}）", flush=True)
         try:

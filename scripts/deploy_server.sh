@@ -129,98 +129,69 @@ fi
 # data/auth 目录
 mkdir -p data/auth data/database data/raw data/exports data/screenshots logs
 
-if [ -f data/auth/storage_state.json ]; then
-    ok "登录态文件已存在: data/auth/storage_state.json"
+# V2 认证说明：主认证 = 持久浏览器档案 /var/lib/smm-collector/browser-profile
+#（备份包恢复），data/auth/storage_state.json 仅为 V1 fallback。
+if [ -d /var/lib/smm-collector/browser-profile ]; then
+    ok "持久浏览器档案已就位: /var/lib/smm-collector/browser-profile"
+elif [ -f data/auth/storage_state.json ]; then
+    warn "未发现 V2 持久档案；存在 V1 fallback 登录态（data/auth/storage_state.json）"
+    warn "请按迁移指南恢复 /var/lib/smm-collector（含 browser-profile 与状态文件）"
 else
     echo ""
     warn "==========================================="
-    warn "  未找到登录态文件！"
+    warn "  未找到任何 SMM 登录态！"
     warn "==========================================="
     echo ""
-    echo "  请在你的 Windows 本机执行："
-    echo ""
-    echo "    # 1. 本机登录 SMM"
-    echo "    .venv\\Scripts\\python.exe scripts\\manual_login.py"
-    echo ""
-    echo "    # 2. 上传登录态到服务器"
-    echo "    scp data\\auth\\storage_state.json root@你的服务器IP:${ROOT/#$HOME/~}/data/auth/"
-    echo ""
-    echo "  Cookie 有效期通常 7-30 天，过期后需重新上传。"
+    echo "  请按 docs/SMM_AUTH_AND_COLLECTION_RUNBOOK.md 执行人工登录恢复："
+    echo "    .venv/bin/python scripts/smm_auth_init.py --login   # 需 VNC/X 显示"
+    echo "  或从备份包恢复 /var/lib/smm-collector/。"
     echo ""
 fi
 
 echo ""
 
-# ── 6. 安装 systemd 服务 + crontab ─────────────────────────────
-echo "[6/6] 安装后台服务..."
+# ── 6. 服务用户与后台服务（V2 生产架构，2026-10 迁移修订） ──────
+echo "[6/6] 准备服务用户与后台服务..."
 
-# systemd 文件服务器
-SERVICE_FILE="/etc/systemd/system/smm-fileserver.service"
-if [ ! -f "$SERVICE_FILE" ]; then
-    sudo tee "$SERVICE_FILE" > /dev/null << EOF
-[Unit]
-Description=SMM File Server (端口8888)
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=${ROOT}
-ExecStart=${ROOT}/.venv/bin/python ${ROOT}/scripts/file_server.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    sudo systemctl daemon-reload
-    sudo systemctl enable smm-fileserver --now
-    ok "systemd 文件服务器已安装并启动"
+# 门户低权限运行用户（systemd 单元 User=smmweb，沙箱加固必需）
+if ! id smmweb &>/dev/null; then
+    sudo useradd --system --no-create-home --shell /usr/sbin/nologin smmweb
+    ok "smmweb 用户已创建"
 else
-    info "systemd 服务已存在，跳过"
-    sudo systemctl restart smm-fileserver 2>/dev/null || true
+    info "smmweb 用户已存在，跳过"
 fi
 
-# crontab 定时任务
-CRON_TMP=$(mktemp)
-crontab -l 2>/dev/null > "$CRON_TMP" || true
+# 说明：本脚本不再直接写入 systemd 单元，也不再直接安装 crontab。
+# - systemd：由 scripts/setup_systemd.sh 安装（V2 加固单元：smmweb 低权限 +
+#   ProtectSystem=strict + StateDirectory=smm-fileserver，与生产一致）
+# - 权限加固：bash scripts/secure_fileserver.sh（smmweb 最小只读 ACL）
+# - cron：由 scripts/install_cron.sh 管理（9:05 主采集 / 9:30 兜底 / 10:00 哨兵 / @reboot），
+#   支持 --dry-run 预览与 --remove 移除，且不会误删服务器上其它项目任务
+# - 采集登录态（V2）：持久浏览器档案 /var/lib/smm-collector/browser-profile，
+#   由备份包恢复，不再依赖 data/auth/storage_state.json 上传
+info "systemd 服务安装: sudo bash scripts/setup_systemd.sh"
+info "文件服务权限加固: sudo bash scripts/secure_fileserver.sh"
+info "定时任务安装(先预览): bash scripts/install_cron.sh --dry-run && bash scripts/install_cron.sh"
 
-# 只在不存在时添加（防重复）
-if ! grep -q "run_daily.sh" "$CRON_TMP" 2>/dev/null; then
-    cat >> "$CRON_TMP" << 'CRONEOF'
-
-# SMM 锂电采集 — 工作日 9:00 全量采集
-0 9 * * 1-5 /bin/bash /root/smm-lithium-collector/scripts/run_daily.sh >> /root/smm-lithium-collector/logs/cron.log 2>&1
-
-# SMM 金属补采 — 工作日 11:00 铜铝镍延迟重试
-0 11 * * 1-5 /root/smm-lithium-collector/.venv/bin/python /root/smm-lithium-collector/scripts/retry_metals.py >> /root/smm-lithium-collector/logs/cron_metals.log 2>&1
-CRONEOF
-    crontab "$CRON_TMP"
-    ok "crontab 定时任务已安装"
-else
-    info "crontab 已存在，跳过"
-fi
-rm -f "$CRON_TMP"
-
-ok "后台服务安装完成"
+ok "服务用户与部署提示完成"
 echo ""
 
 # ── 防火墙提示 ────────────────────────────────────────────────
 echo "============================================"
-echo "  ⚠️  防火墙/安全组配置"
+echo "  ⚠️  防火墙/安全组配置（阿里云）"
 echo "============================================"
 echo ""
-echo "  请在百度云控制台 → 安全组 中开放端口："
+echo "  请在阿里云控制台 → 安全组 中开放端口："
 echo ""
-echo "  ┌────────┬────────┬──────────────────────┐"
-echo "  │ 端口   │ 协议   │ 用途                 │"
-echo "  ├────────┼────────┼──────────────────────┤"
-echo "  │ 8888   │ TCP    │ 文件下载（钉钉链接） │"
-echo "  │ 22     │ TCP    │ SSH 远程管理         │"
-echo "  └────────┴────────┴──────────────────────┘"
+echo "  ┌────────┬────────┬──────────────────────────────┐"
+echo "  │ 端口   │ 协议   │ 用途                         │"
+echo "  ├────────┼────────┼──────────────────────────────┤"
+echo "  │ 80     │ TCP    │ 门户入口（nginx 代理到 8888）│"
+echo "  │ 22     │ TCP    │ SSH 远程管理                 │"
+echo "  └────────┴────────┴──────────────────────────────┘"
 echo ""
-echo "  服务器内防火墙："
-echo "    sudo ufw allow 8888/tcp"
+echo "  8888（门户内部端口）与 3306（MySQL）不对公网开放："
+echo "  门户服务默认仅监听 127.0.0.1（FILE_SERVER_BIND），公网访问一律经 nginx 80。"
 echo ""
 
 # ── 部署摘要 ──────────────────────────────────────────────────
@@ -235,21 +206,27 @@ echo ""
 echo "  1. 编辑 .env（如未配置）："
 echo "     vim ${ROOT}/.env"
 echo ""
-echo "  2. 上传登录态（如未上传）："
-echo "     scp data\\auth\\storage_state.json root@你的IP:${ROOT/#$HOME/~}/data/auth/"
+echo "  2. 恢复 V2 持久浏览器档案与系统状态（见 MIGRATION_GUIDE.md §3.3）："
+echo "     /var/lib/smm-collector（browser-profile + 状态文件，0700 root）"
+echo "     /var/lib/smm-fileserver（auth.db 三件套，0700 smmweb，停服状态下恢复）"
+echo "     /etc/smm-collector（secrets.env，0700/0600 root）"
 echo ""
-echo "  3. 测试运行："
+echo "  3. 安装 systemd 与权限加固："
+echo "     sudo bash ${ROOT}/scripts/setup_systemd.sh"
+echo "     sudo bash ${ROOT}/scripts/secure_fileserver.sh"
+echo ""
+echo "  4. 安装定时任务（先预览再安装）："
+echo "     bash ${ROOT}/scripts/install_cron.sh --dry-run"
+echo "     bash ${ROOT}/scripts/install_cron.sh"
+echo ""
+echo "  5. 测试运行："
 echo "     bash ${ROOT}/scripts/run_daily.sh --dry-run"
 echo ""
-echo "  4. 正式采集："
-echo "     bash ${ROOT}/scripts/run_daily.sh"
+echo "  6. 验证文件服务器（经 nginx 80）："
+echo "     curl http://127.0.0.1:8888/health"
 echo ""
-echo "  5. 验证文件服务器："
-echo "     curl http://你的IP:8888/"
-echo ""
-echo "定时任务（已安装）："
-echo "  周一至周五 9:00  - 全量采集 + 报表 + 钉钉"
-echo "  周一至周五 11:00 - 铜铝镍延迟补采"
+echo "定时任务（由 install_cron.sh 管理）："
+echo "  周一至周五 09:05 主采集 / 09:30 兜底补采 / 10:00 健康哨兵 / @reboot 开机补采"
 echo ""
 echo "运维命令："
 echo "  查看日志:      tail -f ${ROOT}/logs/collector_\$(date +%Y-%m-%d).log"

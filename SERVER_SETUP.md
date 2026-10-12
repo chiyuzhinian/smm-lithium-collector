@@ -1,5 +1,8 @@
 # 服务器数据同步与 MySQL 配置操作手册
 
+> ⚠️ **本文档为 2026-08 百度云时代旧文档**，含过时 IP/端口/定时任务口径。
+> 服务器迁移与部署请以 `MIGRATION_GUIDE.md` 及 `docs/deployment/aliyun-migration-2026-10/` 为准。
+
 > 给服务器端 Claude 执行的 Step-by-Step 操作指南。
 > **使用前请先填写下方「凭据清单」中的占位符。**
 
@@ -12,7 +15,7 @@
 | 占位符 | 说明 | 从哪里获取 |
 | ------ | ---- | ---------- |
 | `106.12.59.96` | 百度云服务器的公网 IP | `curl -s ifconfig.me` 或百度云控制台 |
-| `18602563579` | SMM 登录手机号 | 本机 `.env` 中的 `SMM_USERNAME` |
+| `<SMM_USERNAME>` | SMM 登录手机号 | 本机 `.env` 中的 `SMM_USERNAME` |
 | `<SMM_PASSWORD>` | SMM 登录密码 | 本机 `.env` 中的 `SMM_PASSWORD` |
 | `<MYSQL_PASSWORD>` | MySQL root 密码 | 建议和本机 `.env` 中 `MYSQL_PASSWORD` 一致 |
 | `<DINGTALK_WEBHOOK>` | 钉钉机器人 Webhook 完整 URL | 本机 `.env` 中的 `DINGTALK_WEBHOOK` |
@@ -70,7 +73,7 @@ ls -lh data/auth/storage_state.json
 ```bash
 cat > .env << 'ENVEOF'
 # SMM 采集
-SMM_USERNAME=18602563579
+SMM_USERNAME=<SMM_USERNAME>
 SMM_PASSWORD=<SMM_PASSWORD>
 SMM_LOGIN_URL=https://user.smm.cn/login
 SMM_TARGET_URL=https://new-energy.smm.cn/new_energy/14042

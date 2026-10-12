@@ -13,7 +13,7 @@
 #   - 完成后 unset shell 变量（best-effort 内存清除）
 #
 # 使用：
-#   ssh root@106.12.59.96
+#   ssh root@<服务器IP>
 #   sudo bash /root/smm-lithium-collector/scripts/set_smm_secrets.sh
 #
 # 轮换凭据：再跑一次即可（覆盖）。
