@@ -97,4 +97,10 @@ venv 内执行并记录于本文档。**
 | 15:0x | 数据对账：5 PASS；2 ERROR/1 WARNING 均为备份时点既有差异（详见 05 报告） | ⚠️ 既有 |
 | 15:1x | 服务器全量 pytest **466 passed**（修复 1 个时间敏感测试 + 4 个 V2 脚本 sys.path 迁移 bug：commit 5eb55d6 / d925259） | ✅ |
 | 15:1x | smm_health.py 自检恢复工作（staleness=warn：今日未采集，符合预期） | ✅ |
-| 15:2x | 用户确认「先 --dry-run」：SMM 登录态验证（后台执行中） | 进行中 |
+| 15:2x | dry-run 受控测试（用户确认）：**AUTH_OK**（登录态 14 天后仍有效），447 行解析、对齐率 0.74、验证 WARNING、不写库 | ✅ |
+| 15:2x | 用户确认：立即真实采集 + 安装 cron + 不补采缺口 | ✅ |
+| 15:29 | 真实采集：collection_runs **success**（40 分类 447 行），SQLite +431 → 18358（max 2026-10-12），钉钉日报已推送 | ✅ |
+| 15:3x | cron 四条任务安装（dry-run 预览 → 安装，服务器无其它 crontab 冲突） | ✅ |
+| 15:3x | 迁移暴露修复：requirements 补 pymysql+cryptography（1963e09）；MySQL root 改 mysql_native_password；补同步今日 334 条 → MySQL 18238（max 2026-10-12） | ✅ |
+| 15:4x | 门户公网验证今日数据（quotes price_date=2026-10-12）；交付报告 01~09 + CLAUDE.md 更新提交（0ebfa7a） | ✅ |
+| 待办 | 服务器重启自恢复验收（等用户确认时机）；DNS/备案（price.ldhs.online 待用户决策） | 待办 |
