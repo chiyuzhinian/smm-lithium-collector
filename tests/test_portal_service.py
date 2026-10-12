@@ -404,7 +404,10 @@ def test_complete_adjacent_months_mom_formula(db_path, products):
         con.close()
 
 
-def test_september_in_progress_no_mom(db_path, products):
+def test_september_in_progress_no_mom(db_path, products, monkeypatch):
+    # 测试意图 = 「进行中月份不计算环比」；月份推进后 2026-09 已结束，
+    # 固定 month_is_ended 对 2026-09 返回 False 以保持测试语义（不改生产代码）。
+    monkeypatch.setattr(ps, "month_is_ended", lambda month, today=None: month != "2026-09")
     con = ps.open_readonly(db_path)
     try:
         payload = ps.monthly_payload(products, con, "2026-09")
