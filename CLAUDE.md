@@ -1,6 +1,6 @@
 # CLAUDE.md — SMM 锂电现货价格采集系统（含数据门户）
 
-> 本文档基于 **2026-09-06 生产服务器实际运行状态**全面更新。
+> 本文档基于 **2026-10-12 阿里云 ECS 迁移后生产运行状态**更新（原 2026-09-06 版随旧服务器 106.12.59.96 到期作废）。
 > 维护约定：重大变更（新功能/新表/新定时任务/部署变更）后同步更新本文件与 `DEPLOYMENT_STATUS_*.md`。
 
 ## 1. 项目简介
@@ -15,32 +15,35 @@
   - 数据门户：今日价格 / 历史数据 / 业务专题 / 数据质量 / 管理员运维中心
   - 登录状态过期后重新手动登录；页面结构变化时运行诊断脚本
 
-## 2. 生产环境现状（2026-09-06 核实）
+## 2. 生产环境现状（2026-10-12 阿里云迁移后核实）
 
 | 项 | 状态 |
 |----|------|
-| 服务器 | Ubuntu 云服务器，公网 IP **106.12.59.96**，项目路径 `/root/smm-lithium-collector` |
-| venv | `.venv`（Python 3.12）；依赖装于 venv 内 |
-| systemd | `smm-fileserver.service` — **active/running**，端口 8888，非特权用户 smmweb，沙箱加固（ProtectSystem=strict 等），StateDirectory=`/var/lib/smm-fileserver` |
-| cron（root） | 由 `scripts/install_cron.sh` 管理：`5 9 * * 1-5` run_daily.sh、`30 9 * * 1-5` catchup_daily.sh、`@reboot` catchup_daily.sh |
-| nginx (:80) | `ip-access`（default_server，公网 IP 临时入口）+ `price.ldhs.online` → 127.0.0.1:8888 |
-| SQLite | `data/database/smm_lithium.db`：**12661 条**（2025-11 至 2026-09-03，另 1 行 price_date 为空） |
-| MySQL | 本地 3306，库 `smm_lithium`：`smm_price_records` 12656 条（max 2026-09-03）、`smm_sync_runs` 19 批次全 success、`smm_data_quality_issues` 22373 条 |
-| collection_runs | 46 次；最近 2026-09-04 **success**（39 分类 440 行；当日页面缺 PACK） |
-| 每日验证 | 08-31 ~ 09-04 连续 **WARNING**（无 FAIL；WARNING 为周更品种滞后等非致命项） |
-| 门户账号 | huayou（普通）/ admin（管理员），库 `/var/lib/smm-fileserver/auth.db`（PBKDF2-SHA256，0600，Web 不可达） |
-| 钉钉 | 已配置（每日采集完成后推送日报 + Excel 下载链接） |
-| Git 分支 | 生产部署于 **feature/smm-auth-v2**（V2 生产切换 2026-09-18，见 DEPLOYMENT_STATUS_2026-09-18.md）；`main` 落后勿操作；迁移分支 feature/server-migration-2026-09-29（含 MIGRATION_GUIDE.md） |
-| 测试 | **253 passed**（pytest；含 portal_service/monthly_report 及 V5 dataset 多分类/基础金属测试） |
-| 门户重构 | ✅ V3 深色（09-06 晚）/V4 回归修复（09-07）已部署；**2026-09-09 V5 业务升级 + V6 修复优化已开发并 8899 预览验收（234 项浏览器断言全过、pytest 253），生产 8888 待用户确认重启**；详见 `DEPLOYMENT_STATUS_2026-09-09.md` |
+| 服务器 | **阿里云 ECS**，公网 IP **101.37.235.13**（Ubuntu 22.04.5，4C8G/80G），项目路径 `/root/smm-lithium-collector` |
+| venv | `.venv`（Python 3.11，官方源；pip 走阿里云内网镜像） |
+| systemd | `smm-fileserver.service` — active/running，端口 8888 **仅监听 127.0.0.1**（`FILE_SERVER_BIND` 默认），非特权用户 smmweb，沙箱加固（ProtectSystem=strict 等），StateDirectory=`/var/lib/smm-fileserver` |
+| nginx (:80) | `ip-access`（default_server，公网 IP 临时入口）→ 127.0.0.1:8888；`price.ldhs.online` 站点已就位**未启用**（待 DNS/备案）；模板在 `scripts/nginx/` |
+| cron（root） | 由 `scripts/install_cron.sh` 管理：`5 9 * * 1-5` run_daily.sh、`30 9 * * 1-5` catchup_daily.sh、`0 10 * * 1-5` smm_health_sentinel.py、`@reboot` catchup_daily.sh |
+| SQLite | `data/database/smm_lithium.db`：**18358 条**（2025-11 至 2026-10-12；**09-29~10-11 空窗**，用户确认不补采；另 1 行 price_date 为空） |
+| MySQL | 本地 3306，库 `smm_lithium`：`smm_price_records` **18238 条**（max 2026-10-12）；root@localhost 为 mysql_native_password（与旧机一致） |
+| collection_runs | 2026-10-12 **success**（40 分类 447 行；PACK 页面缺失 → 固定汇总 temp_snapshot 正常机制） |
+| 每日验证 | 2026-10-12 **WARNING**（无 FAIL） |
+| 门户账号 | 7 用户（含 huayou/admin），库 `/var/lib/smm-fileserver/auth.db`（备份迁移，密码哈希原样保留） |
+| 钉钉 | 已配置；`FILE_HOST=http://101.37.235.13`（无端口，经 nginx 80） |
+| Git 分支 | 生产部署于 **feature/aliyun-migration-2026-10**（= 迁移分支 + 4 个迁移修复提交：deploy 脚本修正 / file_server 绑定 127.0.0.1 / V2 脚本 sys.path / requirements 补 pymysql）；原迁移基线 feature/server-migration-2026-09-29；生产历史分支 feature/smm-auth-v2；`main` 落后勿操作 |
+| 代码更新通道 | 服务器直连 GitHub 超时 → 本地 commit+push → `git bundle` → scp → 服务器 `git pull bundle` |
+| 测试 | **466 passed**（服务器 venv 全量；本地 Windows 因 fcntl/Unix 权限模型不能作为测试基准） |
+| 迁移报告 | `docs/deployment/aliyun-migration-2026-10/`（01~09 全部交付文档） |
 
 ### 文档现状（哪些可信）
 
-- ✅ `DEPLOYMENT_STATUS_2026-08-19.md` — 最新生产部署状态（nginx 入口/公网 IP/ICP 状态）
-- ✅ `DEPLOY.md` / `SERVER_SETUP.md` — 服务器部署手册；`QUERIES.md` — SQL 查询参考
-- ✅ `MIGRATION_GUIDE.md` — 服务器迁移与部署指南（2026-09-29 编制：备份包说明 + 新服务器部署 + 验证清单）
+- ✅ `docs/deployment/aliyun-migration-2026-10/` — **本次迁移的完整交付报告（01~09），生产现状以本文件为准**
+- ✅ `MIGRATION_GUIDE.md` — 服务器迁移与部署指南（2026-09-29 编制；部分步骤已被迁移实践修正，如 nginx 站点重建、GitHub bundle 通道）
+- ✅ `DEPLOY.md` / `SERVER_SETUP.md` — 部署手册（⚠️ 旧百度云时代口径，SERVER_SETUP.md 已标注过时）
+- ✅ `QUERIES.md` — SQL 查询参考
 - ✅ `config/categories_portal.yaml` — 门户+固定汇总门控+重点产品+专题的统一配置（关键文件）
 - ❌ `README.md` / `RUN_GUIDE.md` — **已过时**（Windows/ngrok 时代），勿据此操作
+- ❌ `DEPLOYMENT_STATUS_2026-08-19.md` / `2026-09-*.md` — 旧服务器时代的部署状态存档（历史参考）
 
 ## 3. 技术栈
 
