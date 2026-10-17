@@ -533,8 +533,8 @@ class TestBrandStrings:
         assert "锂电价格与回收业务数据中心" in r["body"]
         assert "SMM 锂电价格与回收业务数据中心" not in r["body"]
         assert "华友" not in r["body"]
-        # 数据来源中的 SMM 保留
-        assert "数据来源：SMM 上海有色网公开报价" in r["body"]
+        # 登录页数据来源说明已按业务要求删除（2026-10 需求1）；页脚保留（test_nav_js_brand_and_data_source）
+        assert "数据来源：SMM 上海有色网公开报价" not in r["body"]
 
     def test_overview_banner_title(self, env):
         seed(env.store, "huayou")

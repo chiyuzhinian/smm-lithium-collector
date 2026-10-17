@@ -15,3 +15,6 @@ __pycache__/
 *.swp
 data/backups/
 ngrok.exe
+
+# 生产数据库副本（本地调试用，严禁入库）
+/smm_lithium.db*
