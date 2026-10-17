@@ -833,3 +833,35 @@ def test_history_export_empty_series_still_header_only(db_path, products):
     wb = load_workbook(io.BytesIO(data), read_only=True)
     rows = list(wb["历史价格"].iter_rows(values_only=True))
     assert len(rows) == 1 and rows[0][0] == "产品ID"
+
+
+def test_monthly_payload_subset_calendar_full(db_path, products):
+    """需求5 口径：报表行=子集，采集日历与完整性判定仍按全量。"""
+    con = ps.open_readonly(db_path)
+    try:
+        full = ps.monthly_payload(products, con, "2026-08")
+        subset_ids = ["cell_lfp_100ah"]
+        subset = [p for p in products if p["id"] in subset_ids]
+        sub = ps.monthly_payload(subset, con, "2026-08", calendar_products=products)
+        assert len(sub["rows"]) == 1
+        assert sub["summary"]["total_rows"] == 1
+        # 日历与完整性口径 = 全量
+        assert sub["summary"]["calendar_daily_days"] == full["summary"]["calendar_daily_days"]
+        assert sub["summary"]["calendar_weekly_points"] == full["summary"]["calendar_weekly_points"]
+        r = sub["rows"][0]
+        fr = next(x for x in full["rows"] if x["id"] == "cell_lfp_100ah")
+        assert r["completeness"] == fr["completeness"]
+        assert r["n_points"] == fr["n_points"]
+    finally:
+        con.close()
+
+
+def test_monthly_payload_calendar_products_defaults_to_products(db_path, products):
+    """不传 calendar_products 时旧行为不变（日历=传入集合）。"""
+    con = ps.open_readonly(db_path)
+    try:
+        full = ps.monthly_payload(products, con, "2026-08")
+        again = ps.monthly_payload(products, con, "2026-08")
+        assert again["summary"] == full["summary"]
+    finally:
+        con.close()

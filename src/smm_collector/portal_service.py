@@ -610,8 +610,13 @@ def _weekly_completeness(month: str, meta: dict, n_points: int,
 
 
 def monthly_payload(products: list[dict], con: sqlite3.Connection, month: str,
-                    meta: dict | None = None) -> dict:
-    """GET /api/portal/monthly 响应体：49 行业务月报预览（主表口径）。"""
+                    meta: dict | None = None, calendar_products: list[dict] | None = None) -> dict:
+    """GET /api/portal/monthly 响应体：业务月报预览（主表口径）。
+
+    calendar_products：采集日历与完整性判定的产品全集（需求5：报表行可为
+    默认清单子集，但日历/完整性/环比口径仍按全量计算，避免子集误判
+    "采集日历不完整"）。缺省 = products（旧行为不变）。
+    """
     meta = meta or {}
     bounds = month_bounds(month)
     if bounds is None:
@@ -619,13 +624,14 @@ def monthly_payload(products: list[dict], con: sqlite3.Connection, month: str,
     first, last = bounds
     prev_month = (first.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     ended = month_is_ended(month)
+    cal_src = calendar_products if calendar_products is not None else products
 
-    cal_daily = collection_calendar(con, month, products, "daily")
-    cal_weekly = collection_calendar(con, month, products, "weekly")
+    cal_daily = collection_calendar(con, month, cal_src, "daily")
+    cal_weekly = collection_calendar(con, month, cal_src, "weekly")
     rows = []
     for p in products:
-        st = monthly_stats(p, con, month, meta, all_products=products)
-        prev_st = monthly_stats(p, con, prev_month, meta, all_products=products)
+        st = monthly_stats(p, con, month, meta, all_products=cal_src)
+        prev_st = monthly_stats(p, con, prev_month, meta, all_products=cal_src)
         mom_pct, mom_reason = None, None
         if p.get("mapping_status") in ("confirmed", "confirmed_renamed"):
             cur, prv = st.get("monthly_avg"), prev_st.get("monthly_avg")

@@ -7,6 +7,8 @@ const rstate = {
   ds: { products: [], picked: [], from: "", to: "", series: [], dbLatest: null, historyFrom: null },
   monthly: null,
   historyFrom: null,
+  allProducts: [],   // 业务产品全集 49（含 9 非 SMM），月报默认清单编辑用
+  isAdmin: false,
 };
 
 const COMP_TAG = {
@@ -27,6 +29,7 @@ async function init() {
   try {
     const data = await API.get("/api/portal/products", 60000);
     rstate.ds.products = data.products.filter((p) => p.source === "SMM");
+    rstate.allProducts = data.products;
     rstate.ds.dbLatest = data.meta.db_latest_date;
     rstate.ds.historyFrom = data.meta.history_from;
     rstate.historyFrom = data.meta.history_from;
@@ -37,6 +40,14 @@ async function init() {
   } catch (err) {
     notify("产品列表加载失败：" + err.message, "error");
   }
+  // 月报默认清单编辑入口：仅管理员（前端隐藏仅为体验，服务端 RBAC 兜底）
+  try {
+    const me = await API.me();
+    if (me && me.role === "admin") {
+      rstate.isAdmin = true;
+      document.getElementById("month-products-edit").hidden = false;
+    }
+  } catch (err) { /* 未登录/失败时保持隐藏 */ }
   await searchDataset();   // 无选择 = 全部 40 个业务品种，页面加载即有对比表
 }
 
@@ -257,6 +268,58 @@ function bindMonthly() {
     if (!month) return;
     e.preventDefault();
     window.open(`/api/portal/monthly/download?month=${encodeURIComponent(month)}`, "_blank");
+  });
+  document.getElementById("month-products-edit").addEventListener("click", openMonthlyProductsEditor);
+}
+
+/* 月报默认产品清单编辑弹层（需求5）：管理员勾选 → POST /api/admin/monthly-defaults 持久保存 */
+async function openMonthlyProductsEditor() {
+  const all = rstate.allProducts;
+  if (!all.length) { notify("产品列表尚未加载完成", "error"); return; }
+  let current;
+  try {
+    const d = await API.get("/api/portal/monthly/defaults");
+    current = new Set(d.ids || []);
+  } catch (err) {
+    notify("默认清单加载失败：" + err.message, "error");
+    return;
+  }
+  const allIds = all.map((p) => p.id);
+  const selectedAll = current.size === 0 || allIds.every((id) => current.has(id));
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal-card">
+    <h3>调整月报默认产品清单</h3>
+    <p class="modal-sub">保存后月报预览与下载只包含勾选产品；采集日历与完整性口径不变。</p>
+    <div class="modal-list">${all.map((p) => `
+      <label><input type="checkbox" data-id="${escHtml(p.id)}" ${selectedAll || current.has(p.id) ? "checked" : ""}>
+      ${escHtml(p.display_name)}${p.spec ? `<span style="color:var(--c-ink-3)">（${escHtml(p.spec.slice(0, 16))}${p.spec.length > 16 ? "…" : ""}）</span>` : ""}</label>`).join("")}
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="mp-cancel">取消</button>
+      <button class="btn ghost" id="mp-reset">重置为全部</button>
+      <button class="btn primary" id="mp-save">保存</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector("#mp-cancel").addEventListener("click", close);
+  overlay.querySelector("#mp-reset").addEventListener("click", () => {
+    overlay.querySelectorAll(".modal-list input").forEach((c) => { c.checked = true; });
+  });
+  overlay.querySelector("#mp-save").addEventListener("click", async () => {
+    const ids = [...overlay.querySelectorAll(".modal-list input:checked")]
+      .map((c) => c.dataset.id)
+      .filter((id) => allIds.includes(id));
+    try {
+      await API.post("/api/admin/monthly-defaults", { ids });
+      notify(`默认清单已保存（${ids.length} 个产品）`);
+      close();
+      await loadMonthly();
+    } catch (err) {
+      notify("保存失败：" + (err.data && err.data.error ? err.data.error : err.message), "error");
+    }
   });
 }
 

@@ -152,6 +152,13 @@ CREATE TABLE IF NOT EXISTS ops_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_created ON ops_events(created_at);
+-- 月度业务报表默认产品清单（全局唯一；id = business_products.yaml 稳定产品 ID）
+CREATE TABLE IF NOT EXISTS monthly_default_products (
+    id         TEXT PRIMARY KEY,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -313,6 +320,25 @@ class AuthStore:
                 return False
         self.delete_all_sessions(user_id)
         return True
+
+    # ── 月报默认产品清单（需求5：全局唯一，存 auth.db 唯一可写库） ──
+
+    def get_monthly_defaults(self) -> list[dict]:
+        """返回 [{"id": ..., "sort": ...}] 按 sort 升序；空表返回 []（前端=默认全量）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, sort FROM monthly_default_products ORDER BY sort, id").fetchall()
+        return [{"id": r["id"], "sort": r["sort"]} for r in rows]
+
+    def set_monthly_defaults(self, ids: list[str], updated_by: str) -> None:
+        """整体替换默认清单（单事务 DELETE + INSERT；ids=[] 表示重置为全量）。"""
+        now = _iso(_now())
+        with self._conn() as conn:
+            conn.execute("DELETE FROM monthly_default_products")
+            conn.executemany(
+                "INSERT INTO monthly_default_products(id, sort, updated_by, updated_at)"
+                " VALUES(?,?,?,?)",
+                [(pid, idx, updated_by, now) for idx, pid in enumerate(ids)])
 
     # ── 登录与锁定 ────────────────────────────────────
 

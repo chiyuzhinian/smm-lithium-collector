@@ -366,3 +366,26 @@ class TestSchemaMigration:
         with sqlite3.connect(legacy) as con:
             cols = [r[1] for r in con.execute("PRAGMA table_info(users)")]
         assert "is_deleted" in cols
+
+
+# ── 月报默认产品清单（需求5） ──────────────────────────
+
+class TestMonthlyDefaultsStore:
+    def test_get_empty(self, store):
+        assert store.get_monthly_defaults() == []
+
+    def test_set_get_roundtrip_order(self, store):
+        store.set_monthly_defaults(["al_a00", "cell_lfp_100ah", "lce_battery"], "admin")
+        out = store.get_monthly_defaults()
+        assert [d["id"] for d in out] == ["al_a00", "cell_lfp_100ah", "lce_battery"]
+        assert [d["sort"] for d in out] == [0, 1, 2]
+
+    def test_set_replaces_previous(self, store):
+        store.set_monthly_defaults(["al_a00"], "admin")
+        store.set_monthly_defaults(["cu_1e", "ni_1e"], "admin")
+        assert [d["id"] for d in store.get_monthly_defaults()] == ["cu_1e", "ni_1e"]
+
+    def test_set_empty_clears(self, store):
+        store.set_monthly_defaults(["al_a00"], "admin")
+        store.set_monthly_defaults([], "admin")
+        assert store.get_monthly_defaults() == []

@@ -67,10 +67,15 @@ def _number_format_for(value: Decimal | None) -> str:
 
 
 def build_monthly_report(products: list[dict], con: sqlite3.Connection, month: str,
-                         meta: dict | None = None) -> Workbook:
-    """生成月度业务报表工作簿：主表 + 报价明细 + 计算说明。"""
+                         meta: dict | None = None,
+                         calendar_products: list[dict] | None = None) -> Workbook:
+    """生成月度业务报表工作簿：主表 + 报价明细 + 计算说明。
+
+    calendar_products 透传给 monthly_payload：报表行=products（可为默认清单
+    子集），采集日历与完整性口径=calendar_products（全量）。
+    """
     meta = meta or {}
-    payload = ps.monthly_payload(products, con, month, meta)
+    payload = ps.monthly_payload(products, con, month, meta, calendar_products=calendar_products)
     if "error" in payload:
         raise ValueError(payload["error"])
     rows, summary = payload["rows"], payload["summary"]
@@ -267,9 +272,10 @@ def _remark_for(rng: dict) -> str | None:
 
 
 def build_monthly_report_xlsx(products: list[dict], con: sqlite3.Connection, month: str,
-                              meta: dict | None = None) -> io.BytesIO:
+                              meta: dict | None = None,
+                              calendar_products: list[dict] | None = None) -> io.BytesIO:
     """生成并返回 xlsx 字节流（门户下载/脚本共用）。"""
-    wb = build_monthly_report(products, con, month, meta)
+    wb = build_monthly_report(products, con, month, meta, calendar_products=calendar_products)
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)

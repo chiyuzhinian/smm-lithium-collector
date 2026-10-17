@@ -254,7 +254,7 @@ def _portal_config() -> dict:
 # ── 业务品种映射（config/business_products.yaml，按 mtime 缓存） ──
 
 BUSINESS_CFG = PROJECT_ROOT / "config" / "business_products.yaml"
-_business_cache = {"mtime": 0.0, "products": [], "meta": {}}
+_business_cache = {"path": None, "mtime": 0.0, "products": [], "meta": {}}
 
 
 def _business_products() -> tuple[list[dict], dict]:
@@ -265,9 +265,10 @@ def _business_products() -> tuple[list[dict], dict]:
         mtime = BUSINESS_CFG.stat().st_mtime
     except OSError:
         return [], {}
-    if _business_cache["mtime"] != mtime:
+    if _business_cache["path"] != str(BUSINESS_CFG) or _business_cache["mtime"] != mtime:
         products, meta = portal_service.load_products(PROJECT_ROOT / "config")
-        _business_cache.update({"mtime": mtime, "products": products, "meta": meta})
+        _business_cache.update({"path": str(BUSINESS_CFG), "mtime": mtime,
+                                "products": products, "meta": meta})
     return _business_cache["products"], _business_cache["meta"]
 
 
@@ -1345,6 +1346,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._api_portal_monthly(parse_qs(urlsplit(self.path).query))
         elif path == "/api/portal/monthly/download":
             self._api_portal_monthly_download(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/portal/monthly/defaults":
+            self._api_portal_monthly_defaults_get()
         elif path == "/api/portal/dataset/categories":
             self._api_portal_dataset_categories()
         elif path == "/api/portal/dataset/products":
@@ -1385,6 +1388,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_change_password()
         elif path == "/api/admin/users":
             self._handle_admin_users_post()
+        elif path == "/api/admin/monthly-defaults":
+            self._handle_admin_monthly_defaults_post()
         else:
             self._serve_json({"error": "not found"}, status=404)
 
@@ -1878,18 +1883,78 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             con.close()
 
+    def _monthly_subset(self, products: list) -> list:
+        """月报默认产品清单（auth.db）过滤 products；清单空=全量（旧行为）。"""
+        try:
+            defaults = AUTH_STORE.get_monthly_defaults()
+        except sqlite3.Error:
+            defaults = []
+        if not defaults:
+            return products
+        keep = {d["id"] for d in defaults}
+        return [p for p in products if p["id"] in keep]
+
     def _api_portal_monthly(self, q: dict):
-        """GET /api/portal/monthly?month=YYYY-MM：月度业务报表预览（49 行）。"""
+        """GET /api/portal/monthly?month=YYYY-MM：月度业务报表预览（默认清单口径）。
+
+        报表行=默认清单子集；采集日历与完整性判定仍按全量产品（calendar_products）。
+        """
         products, meta = _business_products()
         month = (q.get("month") or [None])[0]
         if not month or portal_service.month_bounds(month) is None:
             self._serve_json({"error": "月份格式非法（应为 YYYY-MM）"}, status=400)
             return
+        subset = self._monthly_subset(products)
         con = _db_conn()
         try:
-            self._serve_json(portal_service.monthly_payload(products, con, month, meta))
+            self._serve_json(portal_service.monthly_payload(
+                subset, con, month, meta, calendar_products=products))
         finally:
             con.close()
+
+    def _api_portal_monthly_defaults_get(self):
+        """GET /api/portal/monthly/defaults：默认产品清单（登录即可读，非敏感）。"""
+        try:
+            defaults = AUTH_STORE.get_monthly_defaults()
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        self._serve_json({"ids": [d["id"] for d in defaults]})
+
+    def _handle_admin_monthly_defaults_post(self):
+        """POST /api/admin/monthly-defaults：{ids:[...]} 整体替换默认清单（admin+CSRF）。
+
+        id 白名单校验=业务产品全集；ids=[] 重置为默认全量。"""
+        if not self._check_csrf():
+            self._serve_json({"error": "CSRF 校验失败"}, status=403)
+            return
+        body = self._read_json_body()
+        if body is None:
+            self._serve_json({"error": "请求体无效"}, status=400)
+            return
+        raw_ids = body.get("ids")
+        if not isinstance(raw_ids, list):
+            self._serve_json({"error": "ids 必须为数组"}, status=400)
+            return
+        products, _meta = _business_products()
+        valid = {p["id"] for p in products}
+        ids, seen = [], set()
+        for pid in raw_ids:
+            if not isinstance(pid, str) or pid not in valid:
+                self._serve_json({"error": f"无效产品ID: {pid}"}, status=400)
+                return
+            if pid not in seen:
+                seen.add(pid)
+                ids.append(pid)
+        username = (self._user or {}).get("username", "?")
+        try:
+            AUTH_STORE.set_monthly_defaults(ids, username)
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        AUTH_STORE.write_event("MONTHLY_DEFAULTS_UPDATED", "info",
+                               f"{username} 更新月报默认产品清单（{len(ids)} 个）")
+        self._serve_json({"ok": True, "ids": ids})
 
     def _api_portal_history_download(self, q: dict):
         """GET /api/portal/history/download?ids=&from=&to=：全产品历史报价 xlsx 下载。
@@ -1931,6 +1996,7 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
     def _api_portal_monthly_download(self, q: dict):
         """GET /api/portal/monthly/download?month=YYYY-MM：月度业务报表 xlsx 下载。
 
+        与预览同口径：报表行=默认清单子集、日历/完整性=全量。
         内存生成（systemd ProtectSystem=strict 只读运行下也可用），不落盘、不覆盖任何历史文件。
         """
         products, meta = _business_products()
@@ -1941,10 +2007,12 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         if monthly_report is None:
             self._serve_json({"error": "报表模块不可用"}, status=503)
             return
+        subset = self._monthly_subset(products)
         try:
             con = _db_conn()
             try:
-                buf = monthly_report.build_monthly_report_xlsx(products, con, month, meta)
+                buf = monthly_report.build_monthly_report_xlsx(
+                    subset, con, month, meta, calendar_products=products)
             finally:
                 con.close()
         except ValueError as e:

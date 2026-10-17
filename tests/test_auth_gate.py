@@ -7,6 +7,7 @@ from __future__ import annotations
 import http.client
 import importlib.util
 import json
+import shutil
 import sqlite3
 import threading
 from pathlib import Path
@@ -76,6 +77,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "EXPORTS_ROOT", tmp_path / "exports")
     monkeypatch.setattr(mod, "DB_PATH", tmp_path / "smm.db")
     monkeypatch.setattr(mod, "STATIC_ROOT", Path(__file__).resolve().parents[1] / "static")
+    # BUSINESS_CFG 模块级固化真实路径，必须一并指向 tmp（否则各测试共享真实配置的 mtime 缓存）
+    monkeypatch.setattr(mod, "BUSINESS_CFG", tmp_path / "config" / "business_products.yaml")
+    mod._business_cache.update({"path": None, "mtime": 0.0, "products": [], "meta": {}})
     (tmp_path / "exports").mkdir()
     portal_cfg = tmp_path / "portal.yaml"
     portal_cfg.write_text(PORTAL_YAML, encoding="utf-8")
@@ -603,3 +607,77 @@ class TestHistoryDownload:
                     headers=cookie_header(cookie))
         assert r["status"] == 200
         assert r["headers"]["content-disposition"].startswith("attachment")
+
+
+# ── 月报默认产品清单（需求5） ──────────────────────────
+
+class TestMonthlyDefaultsApi:
+    @staticmethod
+    def _seed_config(env):
+        """把真实 config 目录复制进 tmp PROJECT_ROOT（id 白名单校验依赖 business_products.yaml）。"""
+        dst = env.root / "config"
+        if not dst.exists():
+            shutil.copytree(Path(__file__).resolve().parents[1] / "config", dst)
+
+    def test_get_requires_login(self, env):
+        r = request(env.port, "GET", "/api/portal/monthly/defaults")
+        assert r["status"] == 401
+
+    def test_post_non_admin_403(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = request(env.port, "POST", "/api/admin/monthly-defaults",
+                    json.dumps({"ids": ["al_a00"]}),
+                    {**cookie_header(cookie), "Content-Type": "application/json"})
+        assert r["status"] == 403
+
+    def test_post_without_csrf_403(self, env):
+        seed(env.store, "admin", role="admin")
+        _, cookie = login(env.port, "admin", "pw-123456")
+        r = request(env.port, "POST", "/api/admin/monthly-defaults",
+                    json.dumps({"ids": ["al_a00"]}),
+                    {**cookie_header(cookie), "Content-Type": "application/json"})
+        assert r["status"] == 403
+
+    def test_post_invalid_id_400(self, env):
+        self._seed_config(env)
+        seed(env.store, "admin", role="admin")
+        _, cookie = login(env.port, "admin", "pw-123456")
+        csrf = json.loads(request(env.port, "GET", "/api/auth/csrf",
+                                  headers=cookie_header(cookie))["body"])["csrf_token"]
+        r = request(env.port, "POST", "/api/admin/monthly-defaults",
+                    json.dumps({"ids": ["not_a_real_id"]}),
+                    {**cookie_header(cookie), "Content-Type": "application/json",
+                     "X-CSRF": csrf})
+        assert r["status"] == 400
+        assert "无效产品ID" in r["body"]
+
+    def test_post_persists_and_get_roundtrip(self, env):
+        self._seed_config(env)
+        seed(env.store, "admin", role="admin")
+        _, cookie = login(env.port, "admin", "pw-123456")
+        csrf = json.loads(request(env.port, "GET", "/api/auth/csrf",
+                                  headers=cookie_header(cookie))["body"])["csrf_token"]
+        r = request(env.port, "POST", "/api/admin/monthly-defaults",
+                    json.dumps({"ids": ["al_a00", "cu_1e"]}),
+                    {**cookie_header(cookie), "Content-Type": "application/json",
+                     "X-CSRF": csrf})
+        assert r["status"] == 200 and json.loads(r["body"])["ok"] is True
+        g = request(env.port, "GET", "/api/portal/monthly/defaults",
+                    headers=cookie_header(cookie))
+        assert g["status"] == 200
+        assert json.loads(g["body"])["ids"] == ["al_a00", "cu_1e"]
+
+    def test_post_empty_resets_to_full(self, env):
+        seed(env.store, "admin", role="admin")
+        _, cookie = login(env.port, "admin", "pw-123456")
+        csrf = json.loads(request(env.port, "GET", "/api/auth/csrf",
+                                  headers=cookie_header(cookie))["body"])["csrf_token"]
+        r = request(env.port, "POST", "/api/admin/monthly-defaults",
+                    json.dumps({"ids": []}),
+                    {**cookie_header(cookie), "Content-Type": "application/json",
+                     "X-CSRF": csrf})
+        assert r["status"] == 200
+        g = request(env.port, "GET", "/api/portal/monthly/defaults",
+                    headers=cookie_header(cookie))
+        assert json.loads(g["body"])["ids"] == []

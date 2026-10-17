@@ -1499,3 +1499,28 @@ input.ctl[type="date"], input.ctl[type="month"] { font-family: var(--sans); }
   border-radius: 8px;
   border: 1px dashed var(--line, #E2E8F0);
 }
+
+/* ── 弹层（月报默认产品清单编辑） ─────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(15, 23, 42, .45);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-card {
+  background: var(--c-panel); border: 1px solid var(--c-line);
+  border-radius: 12px; box-shadow: 0 16px 48px rgba(15, 23, 42, .18);
+  width: min(560px, calc(100vw - 32px)); max-height: 80vh;
+  display: flex; flex-direction: column; padding: 20px;
+}
+.modal-card h3 { margin: 0 0 4px; font-size: 16px; color: var(--c-ink); }
+.modal-sub { margin: 0 0 12px; font-size: 12px; color: var(--c-ink-3); }
+.modal-list {
+  overflow: auto; border: 1px solid var(--c-line); border-radius: 8px;
+  padding: 8px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;
+}
+.modal-list label {
+  display: flex; align-items: center; gap: 8px; font-size: 13px;
+  color: var(--c-ink-2); cursor: pointer; padding: 3px 0;
+}
+.modal-list input[type="checkbox"] { accent-color: var(--c-accent); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
