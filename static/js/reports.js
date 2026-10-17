@@ -94,6 +94,17 @@ function bindDataset() {
     setupDateDefaults();
     await searchDataset();
   });
+  /* 下载 Excel：与 searchDataset 完全同源的产品/日期口径（ids 空=全部业务品种） */
+  document.getElementById("ds-download").addEventListener("click", () => {
+    const ids = rstate.ds.picked.length
+      ? rstate.ds.picked
+      : rstate.ds.products.map((p) => p.id);
+    const params = new URLSearchParams();
+    params.set("ids", ids.join(","));
+    if (rstate.ds.from) params.set("from", rstate.ds.from);
+    if (rstate.ds.to) params.set("to", rstate.ds.to);
+    window.open("/api/portal/history/download?" + params.toString(), "_blank");
+  });
 }
 
 function renderProdSuggest(open) {

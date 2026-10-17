@@ -1339,6 +1339,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._api_portal_quotes(parse_qs(urlsplit(self.path).query))
         elif path == "/api/portal/history":
             self._api_portal_history(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/portal/history/download":
+            self._api_portal_history_download(parse_qs(urlsplit(self.path).query))
         elif path == "/api/portal/monthly":
             self._api_portal_monthly(parse_qs(urlsplit(self.path).query))
         elif path == "/api/portal/monthly/download":
@@ -1888,6 +1890,43 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_json(portal_service.monthly_payload(products, con, month, meta))
         finally:
             con.close()
+
+    def _api_portal_history_download(self, q: dict):
+        """GET /api/portal/history/download?ids=&from=&to=：全产品历史报价 xlsx 下载。
+
+        参数与 /api/portal/history 完全一致：from 缺省钳 history_from（采集起点），
+        to 缺省=至今（DB 最新业务日）；ids 缺省=全部 40 个 SMM 业务品种。
+        内存生成（ProtectSystem=strict 只读运行下可用），不落盘、不覆盖历史文件。
+        """
+        products, meta = _business_products()
+        ids = [i.strip() for i in (q.get("ids") or [""])[0].split(",") if i.strip()]
+        if not ids:
+            ids = [p["id"] for p in portal_service.smm_products(products)]
+        date_from = (q.get("from") or [None])[0]
+        date_to = (q.get("to") or [None])[0]
+        try:
+            con = _db_conn()
+            try:
+                payload = portal_service.history_payload(
+                    products, con, ids, date_from=date_from, date_to=date_to, meta=meta)
+            finally:
+                con.close()
+        except Exception:
+            print("[ERROR] history download query failed", file=sys.stderr, flush=True)
+            self._serve_503()
+            return
+        buf = monthly_report.build_history_export_xlsx(products, payload["series"])
+        body = buf.getvalue()
+        fname = monthly_report.history_export_filename(
+            payload["meta"].get("date_from"), payload["meta"].get("date_to"))
+        self.send_response(200)
+        self.send_header("Content-Type",
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(fname)}")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _api_portal_monthly_download(self, q: dict):
         """GET /api/portal/monthly/download?month=YYYY-MM：月度业务报表 xlsx 下载。

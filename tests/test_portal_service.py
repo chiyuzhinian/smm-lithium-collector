@@ -792,3 +792,44 @@ def test_catalog_rename_missing_new_ignored(tmp_path):
     assert [p["product_name"] for p in cat["products"]] == ["六氟磷酸锂（国产）"]
     assert cat["aliases"] == {}
     con.close()
+
+
+# ── 历史导出（需求4） ──────────────────────────────────
+
+def test_history_export_workbook_rows_and_columns(db_path, products):
+    """build_history_export_xlsx：11 列表头、行数=全部报价点、分类补查自业务定义。"""
+    import io
+    from smm_collector import monthly_report
+
+    con = ps.open_readonly(db_path)
+    try:
+        payload = ps.history_payload(products, con, ["lfp_power_255", "cell_lfp_100ah"],
+                                     date_from="2026-07-20", date_to="2026-08-31")
+        total_points = sum(len(s["points"]) for s in payload["series"])
+        buf = monthly_report.build_history_export_xlsx(products, payload["series"])
+        data = buf.getvalue()
+    finally:
+        con.close()
+    assert data[:2] == b"PK"
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(data), read_only=True)
+    ws = wb["历史价格"]
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows[0] == tuple(monthly_report.HISTORY_EXPORT_HEADERS)
+    assert len(rows) - 1 == total_points
+    # 分类列（第 4 列）从业务产品定义补查，非空
+    assert all(r[3] for r in rows[1:])
+
+
+def test_history_export_empty_series_still_header_only(db_path, products):
+    """无报价点的窗口导出仅表头（不虚构数据行）。"""
+    import io
+    from smm_collector import monthly_report
+
+    buf = monthly_report.build_history_export_xlsx(products, [])
+    data = buf.getvalue()
+    assert data[:2] == b"PK"
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(data), read_only=True)
+    rows = list(wb["历史价格"].iter_rows(values_only=True))
+    assert len(rows) == 1 and rows[0][0] == "产品ID"

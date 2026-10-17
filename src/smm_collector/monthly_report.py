@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -277,3 +278,60 @@ def build_monthly_report_xlsx(products: list[dict], con: sqlite3.Connection, mon
 
 def report_filename(month: str) -> str:
     return f"月度业务报表_{month}.xlsx"
+
+
+# ── 全产品历史报价平面导出（需求4：与 /api/portal/history 同口径） ──
+
+HISTORY_EXPORT_HEADERS = ["产品ID", "产品名称", "规格", "分类", "报价日期",
+                          "最低价", "最高价", "日均价", "涨跌", "单位", "采集更新时间"]
+HISTORY_COLUMN_WIDTHS = {"A": 22, "B": 26, "C": 32, "D": 16, "E": 14,
+                         "F": 10, "G": 10, "H": 10, "I": 10, "J": 10, "K": 22}
+
+
+def build_history_export_xlsx(products: list[dict], series: list[dict]) -> io.BytesIO:
+    """全产品历史报价扁平导出（write_only 流式写入，内存生成不落盘）。
+
+    series = portal_service.history_payload 的 series 列表（每元素含 points）；
+    产品名称/规格/分类从业务产品定义（products）按 id 补查，报价点字段来自
+    point_payload（价格/涨跌/单位/采集更新时间）。无点产品跳过；不合并不同规格。
+    """
+    by_id = {p["id"]: p for p in products}
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("历史价格")
+    font, fill, align = _header_style()
+    header_row = []
+    for h in HISTORY_EXPORT_HEADERS:
+        c = WriteOnlyCell(ws, value=h)
+        c.font, c.fill, c.alignment = font, fill, align
+        header_row.append(c)
+    ws.append(header_row)
+    thin = _thin_border()
+    for s in series:
+        pdef = by_id.get(s.get("id"))
+        if not pdef:
+            continue
+        for pt in s.get("points") or []:
+            row = []
+            for v in [s["id"],
+                      pdef.get("display_name") or s.get("display_name"),
+                      s.get("spec") or pdef.get("spec"),
+                      pdef.get("info_category") or pt.get("category"),
+                      pt.get("price_date"), pt.get("min_price"), pt.get("max_price"),
+                      pt.get("average_price"), pt.get("change_value"),
+                      s.get("unit") or pt.get("unit"), pt.get("collected_at")]:
+                c = WriteOnlyCell(ws, value=v)
+                c.border = thin
+                row.append(c)
+            ws.append(row)
+    for col, w in HISTORY_COLUMN_WIDTHS.items():
+        ws.column_dimensions[col].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def history_export_filename(date_from: str | None, date_to: str | None) -> str:
+    f = date_from or "起"
+    t = date_to or "至今"
+    return f"历史价格_{f}_{t}.xlsx"

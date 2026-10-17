@@ -11,7 +11,7 @@ import sqlite3
 import threading
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import pytest
 
@@ -556,3 +556,50 @@ class TestBrandStrings:
         assert r["status"] == 200
         assert "锂电价格与回收业务数据中心" in r["body"]
         assert "SMM 锂电价格与回收业务数据中心" not in r["body"]
+
+
+# ── 历史价格下载（需求4） ─────────────────────────────
+
+def _ensure_price_table(root):
+    con = sqlite3.connect(root / "smm.db")
+    con.execute("""CREATE TABLE IF NOT EXISTS lithium_spot_prices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT, market TEXT, category TEXT, product_name TEXT, specification TEXT DEFAULT '',
+      min_price TEXT, max_price TEXT, average_price TEXT, change_value TEXT, unit TEXT DEFAULT '',
+      price_date TEXT, collected_at TEXT, source_url TEXT, collection_method TEXT, raw_text TEXT,
+      extra_fields TEXT, record_hash TEXT, validation_status TEXT, validation_message TEXT,
+      created_at TEXT, updated_at TEXT)""")
+    con.commit()
+    con.close()
+
+
+class TestHistoryDownload:
+    def test_unauthenticated_401(self, env):
+        r = request(env.port, "GET", "/api/portal/history/download")
+        assert r["status"] == 401
+
+    def test_download_200_xlsx_and_filename_window(self, env):
+        """登录后下载 200：xlsx 魔数 + Content-Disposition 文件名回显请求窗口。"""
+        _ensure_price_table(env.root)
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = request(env.port, "GET",
+                    "/api/portal/history/download?from=2026-07-20&to=2026-08-31",
+                    headers=cookie_header(cookie))
+        assert r["status"] == 200
+        assert r["headers"]["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        assert unquote(r["headers"]["content-disposition"]).endswith(
+            "历史价格_2026-07-20_2026-08-31.xlsx")
+        # body 经 utf-8+replace 解码；xlsx 魔数 PK\x03\x04 前 4 字节为 ASCII/控制字符不受影响
+        assert r["body"][:4] == "PK\x03\x04"
+
+    def test_default_window_no_params_ok(self, env):
+        """无参数下载也 200（from 钳 history_from、to=至今，全量 40 业务品种口径）。"""
+        _ensure_price_table(env.root)
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = request(env.port, "GET", "/api/portal/history/download",
+                    headers=cookie_header(cookie))
+        assert r["status"] == 200
+        assert r["headers"]["content-disposition"].startswith("attachment")
