@@ -138,6 +138,16 @@ function syncRangeUI() {
   }
 }
 
+/* 本地时区日期串（不用 toISOString——UTC 转换在东八区会偏前一天） */
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/* 日期串 → 本地午夜时间戳（ECharts time 轴坐标） */
+function localTs(dateStr) {
+  return new Date(dateStr + "T00:00:00").getTime();
+}
+
 function currentWindow() {
   if (tstate.range === "custom") return { from: tstate.from, to: tstate.to };
   const to = tstate.dbLatest;
@@ -145,7 +155,7 @@ function currentWindow() {
   const days = tstate.range === "7d" ? 7 : 30;
   const d = new Date(to + "T00:00:00");
   d.setDate(d.getDate() - (days - 1));
-  const from = d.toISOString().slice(0, 10);
+  const from = localDateStr(d);
   return { from: from < (tstate.historyFrom || from) ? (tstate.historyFrom || from) : from, to };
 }
 
@@ -235,7 +245,7 @@ function renderSummary() {
     .map((s) => tstate.products.find((p) => p.id === s.id))
     .filter(Boolean);
   const emptyNote = emptyIds.length
-    ? `<span class="status-sep">·</span><span>暂无历史价格：${emptyIds.map((p) => `${escHtml(p.display_name)}（${escHtml(p.unit)}）`).join("、")}</span>` : "";
+    ? `<span class="status-sep">·</span><span>该区间暂无报价：${emptyIds.map((p) => `${escHtml(p.display_name)}（${escHtml(p.unit)}）`).join("、")}</span>` : "";
   const multiUnitNote = tstate.selected.length > 1 &&
     new Set(tstate.series.map((s) => s.unit).filter(Boolean)).size > 2
     ? `<span class="status-sep">·</span><span>所选产品单位超过 2 种，每张图独立 Y 轴仅供参考</span>` : "";
@@ -285,7 +295,7 @@ function renderChips() {
     const name = p.spec ? `${p.display_name}（${p.spec}）` : p.display_name;
     return `<span class="legend-chip">
       <span class="legend-dot" style="background:${chipColor(id)}"></span>
-      <span class="chip-name" title="${escHtml(name)}">${escHtml(name)}${p.unit ? `<span class="chip-unit">${escHtml(p.unit)}</span>` : ""}${empty ? `<span class="chip-empty">暂无历史价格</span>` : ""}</span>
+      <span class="chip-name" title="${escHtml(name)}">${escHtml(name)}${p.unit ? `<span class="chip-unit">${escHtml(p.unit)}</span>` : ""}${empty ? `<span class="chip-empty">该区间暂无报价</span>` : ""}</span>
       <button class="legend-remove" data-id="${escHtml(id)}" aria-label="移除 ${escHtml(name)}">×</button>
     </span>`;
   }).join("");
@@ -328,11 +338,16 @@ function num(v) {
   return isFinite(n) ? n : null;
 }
 
-/* X 轴日期标签：同年 MM-DD，跨年 YYYY-MM-DD */
+/* X 轴日期标签：同年 MM-DD，跨年 YYYY-MM-DD（time 轴收到时间戳） */
 function axisDateFormatter() {
   const { from, to } = currentWindow();
   const crossYear = from && to && from.slice(0, 4) !== to.slice(0, 4);
-  return (v) => (crossYear ? v : String(v).slice(5));
+  return (ts) => {
+    const d = new Date(ts);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return crossYear ? `${d.getFullYear()}-${mm}-${dd}` : `${mm}-${dd}`;
+  };
 }
 
 /* 销毁旧 chart 实例 */
@@ -371,7 +386,7 @@ function renderCharts() {
     const headUnit = p.unit ? `<span class="chart-card-unit">${escHtml(p.unit)}</span>` : "";
     const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
     const headMetric = `<span class="chart-card-metric">${escHtml(metricNames[tstate.metric] || "日均价")}</span>`;
-    const empty = hasData ? "" : `<div class="chart-card-empty">暂无历史价格</div>`;
+    const empty = hasData ? "" : `<div class="chart-card-empty">该区间暂无报价</div>`;
     card.innerHTML = `
       <div class="chart-card-head">
         <span class="chart-card-title">${headName}</span>
@@ -392,19 +407,50 @@ function renderCharts() {
   }
 }
 
-/* 单 chart card 配置：min-max 区间带 + 当前指标线，独立 Y 轴 scale: true */
+/* 单 chart card 配置：min-max 区间带 + 当前指标线，独立 Y 轴 scale: true。
+   V8：xAxis 改 time 轴（min/max=所选窗口，横轴覆盖完整选择区间），
+   数据为 [本地午夜时间戳, 值] 元组；仅绘制真实报价点（connectNulls:false），
+   指标线上 markPoint 标注首/末/高/低点（基于所绘指标非空点，随指标切换）。 */
 function buildCardOption(s, p) {
   const metric = tstate.metric;
-  const dates = s.points.map((pt) => pt.price_date);
+  const { from, to } = currentWindow();
   const bandMin = [], bandDiff = [], metricLine = [];
   for (const pt of s.points) {
+    const ts = localTs(pt.price_date);
     const lo = num(pt.min_price), hi = num(pt.max_price),
           mv = num(pt[metric === "avg" ? "average_price" : metric + "_price"]);
-    bandMin.push(lo ?? null);
-    bandDiff.push(lo !== null && hi !== null ? hi - lo : null);
-    metricLine.push(mv);
+    bandMin.push([ts, lo ?? null]);
+    bandDiff.push([ts, lo !== null && hi !== null ? hi - lo : null]);
+    metricLine.push([ts, mv]);
   }
   const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
+  /* 首/末/高/低：基于所绘指标非空点；单点/重合自动去重 */
+  const labeled = s.points
+    .map((pt) => ({ ts: localTs(pt.price_date),
+                    v: num(pt[metric === "avg" ? "average_price" : metric + "_price"]),
+                    date: pt.price_date }))
+    .filter((x) => x.v !== null);
+  const marks = [];
+  if (labeled.length) {
+    let hi = labeled[0], lo = labeled[0];
+    for (const x of labeled) {
+      if (x.v > hi.v) hi = x;
+      if (x.v < lo.v) lo = x;
+    }
+    const last = labeled[labeled.length - 1];
+    const seen = new Set();
+    for (const x of [{ name: "首点", ...labeled[0] }, { name: "末点", ...last },
+                     { name: "最高", ...hi }, { name: "最低", ...lo }]) {
+      const key = `${x.ts}|${x.v}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      marks.push({ name: x.name, coord: [x.ts, x.v], value: x.v, date: x.date });
+    }
+  }
+  /* 窗口轴域：覆盖用户完整选择区间；单日窗口右边界 +1 天防塌缩 */
+  const xMin = from ? localTs(from) : undefined;
+  let xMax = to ? localTs(to) : undefined;
+  if (from && to && from === to && xMin === xMax) xMax = xMax + 86400000;
   return {
     grid: { left: 12, right: 24, top: 16, bottom: 8, containLabel: true },
     tooltip: {
@@ -440,9 +486,9 @@ function buildCardOption(s, p) {
       },
     },
     xAxis: {
-      type: "category",
-      boundaryGap: ["5%", "5%"],
-      data: dates,
+      type: "time",
+      min: xMin,
+      max: xMax,
       axisLine: { lineStyle: { color: CHART.axis } },
       axisTick: { show: false },
       axisLabel: { color: CHART.label, fontSize: 11, formatter: axisDateFormatter() },
@@ -465,7 +511,16 @@ function buildCardOption(s, p) {
         lineStyle: { color: BRAND_BLUE, width: 2 },
         itemStyle: { color: BRAND_BLUE },
         symbol: "circle", symbolSize: 5,
-        z: 3 },
+        z: 3,
+        markPoint: marks.length ? {
+          symbolSize: 30,
+          label: {
+            fontSize: 10,
+            formatter: (m) => `${m.name}\n${m.data.date}\n${priceText(m.data.value)}`,
+          },
+          itemStyle: { color: BRAND_BLUE },
+          data: marks,
+        } : undefined },
     ],
   };
 }
