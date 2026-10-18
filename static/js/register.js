@@ -17,9 +17,11 @@
     btn.disabled = true;
     const username = document.getElementById("username").value.trim();
     const password = document.getElementById("password").value;
+    const inviteCode = document.getElementById("invite_code").value.trim();
     try {
       // 注册端点公开（注册前无会话），CSRF 豁免
-      await API.post("/api/auth/register", { username, password }, { csrf: false });
+      await API.post("/api/auth/register",
+        { username, password, invite_code: inviteCode }, { csrf: false });
       location.replace("/login?registered=1");
     } catch (err) {
       showError((err.data && err.data.error) || "注册失败，请稍后再试");

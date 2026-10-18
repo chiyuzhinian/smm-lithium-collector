@@ -4,7 +4,7 @@
 
 (function () {
   const POLL_MS = 30000; // 30 秒轮询，与服务端聚合缓存同频
-  const TABS = ["overview", "tasks", "quality", "resources", "logs", "users", "security"];
+  const TABS = ["overview", "tasks", "quality", "resources", "logs", "users", "invites", "security"];
   const SERVICE_KEYS = ["web", "collector", "data_date", "validation", "fixed_summary"];
   const ALERT_LIMIT = 3; // 默认展示条数，其余「查看全部 N 条」
 
@@ -21,6 +21,7 @@
     if (name === "resources") loadResourcesTab();
     if (name === "logs") initLogs();
     if (name === "users") loadUsers();
+    if (name === "invites") loadInvites();
     if (name === "security") loadAudit();
   }
   document.querySelectorAll(".admin-nav a").forEach((a) => {
@@ -403,6 +404,105 @@
     }
   }
 
+  /* ── 邀请码管理（服务端已做 role 校验；明文码仅生成时展示一次） ── */
+  async function loadInvites() {
+    try {
+      const d = await API.get("/api/admin/invites", 0);
+      const rows = d.invites || [];
+      document.getElementById("invites-table").innerHTML = rows.length
+        ? `<div class="table-scroll"><table class="admin-table"><thead><tr><th>编号</th><th>类型</th>` +
+          `<th>前缀</th><th>用量</th><th>创建人</th><th>创建时间</th><th>过期时间</th>` +
+          `<th>绑定用户</th><th>备注</th><th>操作</th></tr></thead><tbody>` +
+          rows.map((inv) => {
+            const type = inv.is_child
+              ? `<span class="badge-ok">绑定记录</span>`
+              : `<span class="badge-warn">父码</span>`;
+            const revoked = inv.revoked_at ? " · 已撤销" : "";
+            const ops = [];
+            if (!inv.revoked_at) {
+              ops.push(`<button class="btn btn-small" data-op="revoke" data-id="${inv.id}">撤销</button>`);
+            }
+            return `<tr>` +
+              `<td>#${inv.id}</td><td>${type}</td>` +
+              `<td>${Fmt.esc(inv.code_prefix)}…</td>` +
+              `<td>${inv.used_count}/${inv.max_uses === 0 ? "∞" : inv.max_uses}</td>` +
+              `<td>${Fmt.esc(inv.created_by || "—")}</td>` +
+              `<td>${Fmt.esc(inv.created_at || "—")}</td>` +
+              `<td>${Fmt.esc(inv.expires_at || "—")}</td>` +
+              `<td>${Fmt.esc(inv.bound_username || "—")}</td>` +
+              `<td>${Fmt.esc((inv.note || "") + revoked)}</td>` +
+              `<td>${ops.join(" ")}</td></tr>`;
+          }).join("") + "</tbody></table></div>"
+        : '<div class="empty-state"><div class="empty-icon">🎫</div><div>暂无邀请码</div></div>';
+      document.querySelectorAll("#invites-table button[data-op]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          if (!confirm("确定撤销该邀请码？撤销后其绑定的用户将无法再凭此码登录。")) return;
+          try {
+            await API.post("/api/admin/invites", { action: "revoke", id: Number(b.dataset.id) });
+            toast("邀请码已撤销", "ok");
+            loadInvites();
+          } catch (err) {
+            toast((err.data && err.data.error) || "操作失败", "");
+          }
+        });
+      });
+      // 填充「重新绑定」的用户下拉
+      const users = await API.get("/api/admin/users", 0);
+      const sel = document.getElementById("invite-rebind-user");
+      sel.innerHTML = (users.users || []).map((u) =>
+        `<option value="${u.id}">${Fmt.esc(u.username)}（#${u.id}${u.role === "admin" ? "，管理员" : ""}）</option>`).join("");
+    } catch (e) { /* ignore */ }
+  }
+
+  function showInviteCode(code) {
+    const box = document.getElementById("invite-code-box");
+    box.hidden = false;
+    box.textContent = "";
+    const p = document.createElement("div");
+    p.innerHTML = `新邀请码（仅此一次显示，请立即复制）：<b style="font-size:16px">${Fmt.esc(code)}</b>`;
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "btn btn-small";
+    copyBtn.textContent = "复制";
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(code);
+        toast("已复制", "ok");
+      } catch (e) { /* 剪贴板不可用时忽略 */ }
+    });
+    p.appendChild(copyBtn);
+    box.appendChild(p);
+  }
+
+  function bindInviteForms() {
+    document.getElementById("invite-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const maxUses = Number(document.getElementById("invite-max-uses").value || "1");
+      const expiresAt = document.getElementById("invite-expires").value || null;
+      const note = document.getElementById("invite-note").value.trim();
+      try {
+        const data = await API.post("/api/admin/invites",
+          { action: "create", max_uses: maxUses, expires_at: expiresAt, note });
+        showInviteCode(data.code);
+        loadInvites();
+      } catch (err) {
+        toast((err.data && err.data.error) || "生成失败", "");
+      }
+    });
+    document.getElementById("invite-rebind-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const uid = Number(document.getElementById("invite-rebind-user").value);
+      if (!uid) return;
+      if (!confirm("确定为该用户重新绑定新邀请码？其当前邀请码将立即失效。")) return;
+      try {
+        const data = await API.post("/api/admin/invites", { action: "rebind", user_id: uid });
+        showInviteCode(data.code);
+        loadInvites();
+      } catch (err) {
+        toast((err.data && err.data.error) || "绑定失败", "");
+      }
+    });
+  }
+
   /* ── 账号安全 ── */
   async function loadAudit() {
     try {
@@ -438,6 +538,7 @@
   }
 
   /* ── 启动 ── */
+  bindInviteForms();
   loadOverview();
   // /admin/users 直达用户管理 tab（页面由服务端闸门校验）
   const initial = location.pathname === "/admin/users" ? "users" : location.hash.replace("#", "");

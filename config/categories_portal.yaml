@@ -258,6 +258,7 @@ auth:
   lockout_window_minutes: 10     # 失败计数滚动窗口（分钟）
   lockout_minutes: 10            # 锁定时长（分钟）
   password_min_length: 8         # 新密码最短长度
+  invite_required: false         # 邀请码强制开关：true=注册必须有效邀请码 + 每次登录必须填与该账号绑定的邀请码
 
 # ── 运维健康检查阈值（管理员运维中心使用；统一在此配置，不散落前端） ──
 health:

@@ -26,6 +26,8 @@
         <svg class="svg-icon" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>运行日志</a></li>
       <li><a href="#users" data-tab="users">
         <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.6c2.7.4 4.7 2 5.4 4.4"/></svg>用户管理</a></li>
+      <li><a href="#invites" data-tab="invites">
+        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 8v8M9 11h6"/></svg>邀请码</a></li>
       <li><a href="#security" data-tab="security">
         <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><circle cx="12" cy="10" r="2"/><path d="M12 12v5"/></svg>账号安全</a></li>
     </ul>
@@ -121,6 +123,28 @@
       <div class="panel" id="users-table"></div>
     </section>
 
+    <!-- 邀请码管理 -->
+    <section class="admin-panel" id="panel-invites" hidden>
+      <h2>邀请码管理</h2>
+      <p class="section-note">生成邀请码供注册与登录使用（邀请码开关开启后强制校验）；同一码可按「可用次数」供多个用户使用。明文码只在生成时显示一次，请立即复制保存。用户码丢失/失效时可为其「重新绑定」。</p>
+      <div class="panel" style="padding:10px 14px">
+        <form id="invite-form" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <label>可用次数 <input id="invite-max-uses" type="number" min="0" max="10000" value="1" style="width:80px" title="0 = 不限次"></label>
+          <label>有效期至 <input id="invite-expires" type="date" title="留空 = 永不过期"></label>
+          <label>备注 <input id="invite-note" type="text" maxlength="100" placeholder="如：新同事入职"></label>
+          <button type="submit" class="btn btn-primary" id="invite-create-btn">生成邀请码</button>
+        </form>
+        <div class="login-error" id="invite-code-box" hidden style="margin-top:8px"></div>
+        <form id="invite-rebind-form" style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <label>为用户重新绑定邀请码（旧码同时失效）：
+            <select id="invite-rebind-user" style="min-width:160px"></select>
+          </label>
+          <button type="submit" class="btn" id="invite-rebind-btn">重新绑定</button>
+        </form>
+      </div>
+      <div class="panel" id="invites-table" style="margin-top:12px"></div>
+    </section>
+
     <!-- 账号安全 -->
     <section class="admin-panel" id="panel-security" hidden>
       <h2>账号安全</h2>
@@ -155,6 +179,6 @@
 <script src="/static/js/api.js?v=6"></script>
 <script src="/static/js/common.js?v=6"></script>
 <script src="/static/js/nav.js?v=6"></script>
-<script src="/static/js/admin.js?v=6"></script>
+<script src="/static/js/admin.js?v=7"></script>
 </body>
 </html>

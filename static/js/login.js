@@ -51,9 +51,10 @@
     btn.disabled = true;
     const username = document.getElementById("username").value.trim();
     const password = document.getElementById("password").value;
+    const inviteCode = document.getElementById("invite_code").value.trim();
     try {
       const data = await API.post("/api/auth/login",
-        { username, password, next: nextParam() }, { csrf: false });
+        { username, password, invite_code: inviteCode, next: nextParam() }, { csrf: false });
       // 初始密码 → 强制去改密页；否则回跳原页面
       location.replace(data.must_change_password ? "/account" : (data.next || "/"));
     } catch (err) {

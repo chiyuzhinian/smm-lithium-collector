@@ -681,3 +681,184 @@ class TestMonthlyDefaultsApi:
         g = request(env.port, "GET", "/api/portal/monthly/defaults",
                     headers=cookie_header(cookie))
         assert json.loads(g["body"])["ids"] == []
+
+# ── 邀请码（需求2） ──────────────────────────────────
+
+INVITE_PORTAL_YAML = """portal:
+  title: "锂电价格与回收业务数据中心"
+  subtitle: "test"
+auth:
+  session_ttl_hours: 10
+  admin_session_ttl_hours: 4
+  cookie_secure: false
+  lockout_max_failures: 5
+  lockout_window_minutes: 10
+  lockout_minutes: 10
+  password_min_length: 8
+  invite_required: true
+health:
+  cache_seconds: 30
+tasks: []
+"""
+
+
+@pytest.fixture
+def invite_env(env):
+    """开关开启环境：重写 portal.yaml 为 invite_required:true 并重置配置缓存。"""
+    env.root.joinpath("portal.yaml").write_text(INVITE_PORTAL_YAML, encoding="utf-8")
+    env.mod._portal_cfg_cache["mtime"] = 0.0
+    env.mod._portal_cfg_cache["data"] = {}
+    return env
+
+
+def login_invite(port, username, password, invite_code=None):
+    payload = {"username": username, "password": password}
+    if invite_code is not None:
+        payload["invite_code"] = invite_code
+    r = request(port, "POST", "/api/auth/login", json.dumps(payload),
+                {"Content-Type": "application/json"})
+    cookie = None
+    for k, v in r["headers"].items():
+        if k == "set-cookie":
+            cookie = v.split(";")[0]
+    return r, cookie
+
+
+def bind_code(store, username, code):
+    """给用户绑定邀请码（复用 rebind 通道）。"""
+    u = store.get_user(username)
+    assert u, "user missing"
+    assert store.rebind_invite(u["id"], code, "admin"), "bind failed"
+
+
+class TestInviteGateEnabled:
+    def test_login_without_invite_rejected(self, invite_env):
+        seed(invite_env.store, "huayou")
+        bind_code(invite_env.store, "huayou", "H-BIND-0001")
+        r, cookie = login_invite(invite_env.port, "huayou", "pw-123456")
+        assert r["status"] == 401
+        assert "邀请码" in r["body"]
+        assert cookie is None
+
+    def test_login_wrong_invite_after_valid_password_401(self, invite_env):
+        seed(invite_env.store, "huayou")
+        bind_code(invite_env.store, "huayou", "H-BIND-0001")
+        r, _ = login_invite(invite_env.port, "huayou", "pw-123456", "WRONG-CODE")
+        assert r["status"] == 401
+        assert "邀请码" in r["body"]
+
+    def test_login_bound_invite_ok(self, invite_env):
+        seed(invite_env.store, "huayou")
+        bind_code(invite_env.store, "huayou", "H-BIND-0001")
+        r, cookie = login_invite(invite_env.port, "huayou", "pw-123456", "H-BIND-0001")
+        assert r["status"] == 200 and json.loads(r["body"])["ok"] is True
+        assert cookie
+
+    def test_register_invalid_code_400(self, invite_env):
+        r = request(invite_env.port, "POST", "/api/auth/register",
+                    json.dumps({"username": "rookie01", "password": "pw-12345678",
+                                "invite_code": "BAD"}),
+                    {"Content-Type": "application/json"})
+        assert r["status"] == 400
+        assert "邀请码" in r["body"]
+
+    def test_register_consume_then_login_same_code(self, invite_env):
+        invite_env.store.create_invite("H-SHARE-001", "admin", max_uses=2)
+        r = request(invite_env.port, "POST", "/api/auth/register",
+                    json.dumps({"username": "rookie02", "password": "pw-12345678",
+                                "invite_code": "H-SHARE-001"}),
+                    {"Content-Type": "application/json"})
+        assert r["status"] == 201
+        r2, cookie = login_invite(invite_env.port, "rookie02", "pw-12345678", "H-SHARE-001")
+        assert r2["status"] == 200 and cookie
+
+    def test_revoked_binding_blocks_login(self, invite_env):
+        """注册消费父码（子行绑定）→ 撤销父码 → 该用户登录被拒（恢复提示文案）。"""
+        info = invite_env.store.create_invite("H-REVK-0001", "admin")
+        st, _, uid = invite_env.store.register_with_invite(
+            "revoked01", "pw-12345678", "H-REVK-0001")
+        assert st == "ok" and uid
+        r1, _ = login_invite(invite_env.port, "revoked01", "pw-12345678", "H-REVK-0001")
+        assert r1["status"] == 200
+        invite_env.store.revoke_invite(info["id"], "admin")
+        r2, _ = login_invite(invite_env.port, "revoked01", "pw-12345678", "H-REVK-0001")
+        assert r2["status"] == 401
+        assert "重新绑定" in r2["body"]
+
+    def test_rebind_new_code_logs_in(self, invite_env):
+        seed(invite_env.store, "huayou")
+        bind_code(invite_env.store, "huayou", "H-OLD-00001")
+        assert login_invite(invite_env.port, "huayou", "pw-123456", "H-OLD-00001")[0]["status"] == 200
+        bind_code(invite_env.store, "huayou", "H-NEW-00001")
+        assert login_invite(invite_env.port, "huayou", "pw-123456", "H-OLD-00001")[0]["status"] == 401
+        assert login_invite(invite_env.port, "huayou", "pw-123456", "H-NEW-00001")[0]["status"] == 200
+
+    def test_switch_off_legacy_login_works(self, env):
+        """开关关闭（默认 env）：登录不带码照常成功——旧流程回归。"""
+        seed(env.store, "huayou")
+        r, cookie = login(env.port, "huayou", "pw-123456")
+        assert r["status"] == 200 and cookie
+
+
+class TestInviteAdminApi:
+    def test_non_admin_403(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        assert request(env.port, "GET", "/api/admin/invites",
+                       headers=cookie_header(cookie))["status"] == 403
+        assert request(env.port, "POST", "/api/admin/invites",
+                       json.dumps({"action": "create"}),
+                       {**cookie_header(cookie), "Content-Type": "application/json"})["status"] == 403
+
+    def test_post_without_csrf_403(self, env):
+        seed(env.store, "admin", role="admin")
+        _, cookie = login(env.port, "admin", "pw-123456")
+        r = request(env.port, "POST", "/api/admin/invites",
+                    json.dumps({"action": "create"}),
+                    {**cookie_header(cookie), "Content-Type": "application/json"})
+        assert r["status"] == 403
+
+    def test_admin_create_returns_code_once_and_list_shows_prefix(self, env):
+        seed(env.store, "admin", role="admin")
+        _, cookie = login(env.port, "admin", "pw-123456")
+        csrf = json.loads(request(env.port, "GET", "/api/auth/csrf",
+                                  headers=cookie_header(cookie))["body"])["csrf_token"]
+        r = request(env.port, "POST", "/api/admin/invites",
+                    json.dumps({"action": "create", "max_uses": 2, "note": "t"}),
+                    {**cookie_header(cookie), "Content-Type": "application/json",
+                     "X-CSRF": csrf})
+        assert r["status"] == 201
+        j = json.loads(r["body"])
+        assert j["ok"] is True and j["code"]
+        assert j["invite"]["code_prefix"] == j["code"][:4]
+        g = request(env.port, "GET", "/api/admin/invites", headers=cookie_header(cookie))
+        assert g["status"] == 200
+        invites = json.loads(g["body"])["invites"]
+        assert any(i["code_prefix"] == j["code"][:4] for i in invites)
+        # 列表绝不泄露明文
+        assert j["code"] not in g["body"]
+        assert "code_hash" not in g["body"]
+
+    def test_admin_revoke_and_rebind(self, env):
+        seed(env.store, "admin", role="admin")
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "admin", "pw-123456")
+        csrf = json.loads(request(env.port, "GET", "/api/auth/csrf",
+                                  headers=cookie_header(cookie))["body"])["csrf_token"]
+        head = {**cookie_header(cookie), "Content-Type": "application/json", "X-CSRF": csrf}
+        r1 = request(env.port, "POST", "/api/admin/invites",
+                     json.dumps({"action": "create"}), head)
+        iid = json.loads(r1["body"])["invite"]["id"]
+        r2 = request(env.port, "POST", "/api/admin/invites",
+                     json.dumps({"action": "revoke", "id": iid}), head)
+        assert r2["status"] == 200
+        u = env.store.get_user("huayou")
+        r3 = request(env.port, "POST", "/api/admin/invites",
+                     json.dumps({"action": "rebind", "user_id": u["id"]}), head)
+        assert r3["status"] == 201
+        j3 = json.loads(r3["body"])
+        assert j3["code"] and j3["invite"]["bound_user_id"] == u["id"]
+        # rebind 未知用户
+        r4 = request(env.port, "POST", "/api/admin/invites",
+                     json.dumps({"action": "rebind", "user_id": 9999}), head)
+        assert r4["status"] == 400

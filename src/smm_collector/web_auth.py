@@ -97,6 +97,11 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _code_hash(code: str) -> str:
+    """邀请码入库前哈希（明文绝不落库/日志）。"""
+    return hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,6 +164,31 @@ CREATE TABLE IF NOT EXISTS monthly_default_products (
     updated_by TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+-- 邀请码（需求2）：父行=管理员生成的码（code_hash 唯一，明文绝不入库）；
+-- 多用途码每次被用户消费时插入子行（parent_id→父行，绑定该用户），父行只累加 used_count；
+-- 单次码直接绑定在父行上。绑定制：登录校验查 bound_user_id 的最新绑定行。
+CREATE TABLE IF NOT EXISTS invite_codes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_hash     TEXT NOT NULL,
+    code_prefix   TEXT NOT NULL,
+    created_by    TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    expires_at    TEXT,
+    max_uses      INTEGER NOT NULL DEFAULT 1,
+    used_count    INTEGER NOT NULL DEFAULT 0,
+    revoked_at    TEXT,
+    note          TEXT,
+    parent_id     INTEGER,
+    bound_user_id INTEGER REFERENCES users(id),
+    bound_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_invite_parent ON invite_codes(parent_id);
+-- 多用途码：父行与各绑定子行共享同一 code_hash，不能唯一，仅建索引
+CREATE INDEX IF NOT EXISTS idx_invite_code_hash ON invite_codes(code_hash);
+-- 部分唯一：仅"未撤销的绑定"占位（撤销旧绑定后可重新绑定，历史行保留审计）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invite_bound_user
+    ON invite_codes(bound_user_id)
+    WHERE bound_user_id IS NOT NULL AND revoked_at IS NULL;
 """
 
 
@@ -339,6 +369,166 @@ class AuthStore:
                 "INSERT INTO monthly_default_products(id, sort, updated_by, updated_at)"
                 " VALUES(?,?,?,?)",
                 [(pid, idx, updated_by, now) for idx, pid in enumerate(ids)])
+
+    # ── 邀请码（需求2：绑定制 + 多用途码；明文绝不入库/日志） ──
+
+    def create_invite(self, code: str, created_by: str, *,
+                      max_uses: int = 1, expires_at: str | None = None,
+                      note: str = "") -> dict | None:
+        """创建邀请码父行（只存 sha256 哈希 + 前 4 位前缀）。返回入库行信息（不含明文）。
+
+        max_uses：0=不限次；>0=可被消费的次数上限。明文由调用方生成并仅展示一次。
+        """
+        now = _iso(_now())
+        try:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "INSERT INTO invite_codes(code_hash, code_prefix, created_by, created_at,"
+                    " expires_at, max_uses, used_count, note)"
+                    " VALUES(?,?,?,?,?,?,0,?)",
+                    (_code_hash(code), code[:4], created_by, now, expires_at,
+                     int(max_uses), note))
+                return {"id": cur.lastrowid, "code_prefix": code[:4],
+                        "created_by": created_by, "created_at": now,
+                        "expires_at": expires_at, "max_uses": int(max_uses),
+                        "used_count": 0, "note": note}
+        except sqlite3.IntegrityError:
+            return None
+
+    def list_invites(self) -> list[dict]:
+        """邀请码列表（管理员视图）：父行 + 子行，绝不含 code_hash。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT i.id, i.code_prefix, i.created_by, i.created_at, i.expires_at,
+                          i.max_uses, i.used_count, i.revoked_at, i.note, i.parent_id,
+                          i.bound_user_id, i.bound_at, u.username AS bound_username
+                   FROM invite_codes i LEFT JOIN users u ON u.id = i.bound_user_id
+                   ORDER BY i.created_at DESC, i.id DESC""").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["is_child"] = d.pop("parent_id") is not None
+            d["bound_username"] = d["bound_username"] or None
+            out.append(d)
+        return out
+
+    def revoke_invite(self, invite_id: int, actor: str) -> bool:
+        """撤销邀请码（父行或绑定行本身）。已撤销/不存在返回 False。不删行不解绑。"""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE invite_codes SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+                (_iso(_now()), invite_id))
+            if cur.rowcount == 0:
+                return False
+        self.write_event("INVITE_REVOKED", "warn", f"{actor} 撤销邀请码 #{invite_id}")
+        return True
+
+    def rebind_invite(self, user_id: int, new_code: str, actor: str) -> dict | None:
+        """为用户重新绑定新邀请码：单事务撤销其现有有效绑定 + 插入一次性绑定行。
+
+        返回新绑定行信息（含前缀）；用户不存在返回 None。新码明文由调用方生成并仅展示一次。
+        """
+        now = _iso(_now())
+        with self._conn() as conn:
+            exists = conn.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone()
+            if not exists:
+                return None
+            conn.execute(
+                "UPDATE invite_codes SET revoked_at=? WHERE bound_user_id=? AND revoked_at IS NULL",
+                (now, user_id))
+            cur = conn.execute(
+                "INSERT INTO invite_codes(code_hash, code_prefix, created_by, created_at,"
+                " max_uses, used_count, bound_user_id, bound_at, note)"
+                " VALUES(?,?,?,?,1,1,?,?,?)",
+                (_code_hash(new_code), new_code[:4], actor, now, user_id, now,
+                 f"rebind by {actor}"))
+            info = {"id": cur.lastrowid, "code_prefix": new_code[:4], "bound_user_id": user_id}
+        # 事件写入必须在新连接（本方法事务已提交），避免同一连接嵌套写锁
+        self.write_event("INVITE_REBOUND", "warn",
+                         f"{actor} 为用户 #{user_id} 重新绑定邀请码（前缀 {new_code[:4]}）")
+        return info
+
+    def register_with_invite(self, username: str, password: str,
+                             code: str) -> tuple[str, str, int | None]:
+        """注册 + 邀请码消费（原子：码被消费但用户创建失败不会发生）。
+
+        校验顺序：用户名/密码格式 → 查重（NOCASE 含软删除）→ 码状态（存在/撤销/
+        过期/耗尽）→ 计数 + 插用户 + 插绑定子行（同一事务）。
+        返回 (status, message, user_id)；status ∈ ok|bad_username|bad_password|
+        duplicate|bad_invite|invite_revoked|invite_expired|invite_exhausted
+        """
+        if not USERNAME_RE.match(username):
+            return "bad_username", "用户名需为3-30位字母、数字、下划线、连字符或中文", None
+        if len(password) < self.password_min_length:
+            return "bad_password", f"密码长度至少 {self.password_min_length} 位", None
+        if len(password) > PASSWORD_MAX_LENGTH:
+            return "bad_password", f"密码长度不能超过 {PASSWORD_MAX_LENGTH} 位", None
+        now = _iso(_now())
+        code_hash = _code_hash(code.strip())
+        try:
+            with self._conn() as conn:
+                dup = conn.execute(
+                    "SELECT 1 FROM users WHERE username=? COLLATE NOCASE LIMIT 1",
+                    (username,)).fetchone()
+                if dup:
+                    return "duplicate", "该用户名已存在，请更换用户名。", None
+                parent = conn.execute(
+                    "SELECT * FROM invite_codes WHERE code_hash=? AND parent_id IS NULL",
+                    (code_hash,)).fetchone()
+                if parent is None:
+                    return "bad_invite", "邀请码无效或已失效", None
+                if parent["revoked_at"]:
+                    return "invite_revoked", "邀请码无效或已失效", None
+                if parent["expires_at"] and parent["expires_at"] <= now:
+                    return "invite_expired", "邀请码无效或已失效", None
+                if parent["max_uses"] > 0 and parent["used_count"] >= parent["max_uses"]:
+                    return "invite_exhausted", "邀请码无效或已失效", None
+                conn.execute("UPDATE invite_codes SET used_count=used_count+1 WHERE id=?",
+                             (parent["id"],))
+                cur = conn.execute(
+                    "INSERT INTO users(username, password_hash, role, is_active,"
+                    " is_deleted, must_change_password, created_at, updated_at)"
+                    " VALUES(?,?,'user',1,0,0,?,?)",
+                    (username, hash_password(password), now, now))
+                user_id = cur.lastrowid
+                conn.execute(
+                    "INSERT INTO invite_codes(code_hash, code_prefix, created_by, created_at,"
+                    " max_uses, used_count, parent_id, bound_user_id, bound_at, note)"
+                    " VALUES(?,?,?,?,1,1,?,?,?,?)",
+                    (code_hash, parent["code_prefix"], parent["created_by"], now,
+                     parent["id"], user_id, now, f"child_of_#{parent['id']}"))
+            self.audit("REGISTER", username, None, detail=f"invite_id={parent['id']}")
+            return "ok", "注册成功", user_id
+        except sqlite3.IntegrityError:
+            return "duplicate", "该用户名已存在，请更换用户名。", None
+
+    def verify_bound_for_login(self, user_id: int, code: str) -> tuple[str, str | None]:
+        """登录时校验与该账号绑定的邀请码。返回 (status, message)。
+
+        status ∈ ok|no_binding|invalid|revoked|expired；message 仅 ok 时非 None。
+        """
+        code_hash = _code_hash((code or "").strip())
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM invite_codes WHERE bound_user_id=? AND revoked_at IS NULL"
+                " ORDER BY bound_at DESC, id DESC LIMIT 1", (user_id,)).fetchone()
+        if row is None:
+            return "no_binding", None
+        if row["expires_at"] and row["expires_at"] <= _iso(_now()):
+            return "expired", None
+        if row["code_hash"] != code_hash:
+            return "invalid", None
+        if row["parent_id"]:
+            with self._conn() as conn:
+                parent = conn.execute(
+                    "SELECT revoked_at FROM invite_codes WHERE id=?", (row["parent_id"],)).fetchone()
+            if parent and parent["revoked_at"]:
+                return "revoked", None
+        return "ok", None
+
+    def record_login_failure(self, username: str, ip: str) -> None:
+        """公开包装：登录阶段（含邀请码）失败计入 (username, ip) 防爆破窗口。"""
+        self._record_attempt(username, ip, _now(), False)
 
     # ── 登录与锁定 ────────────────────────────────────
 

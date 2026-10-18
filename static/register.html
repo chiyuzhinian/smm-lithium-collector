@@ -26,6 +26,10 @@
         <input class="auth-input" id="password" name="password" type="password" required autocomplete="new-password"
                minlength="8" maxlength="128" title="至少 8 位，最多 128 位">
       </div>
+      <div class="auth-field">
+        <label for="invite_code">邀请码</label>
+        <input class="auth-input" id="invite_code" name="invite_code" type="text" autocomplete="off" placeholder="由管理员发放">
+      </div>
       <div class="auth-error" id="register-error" hidden></div>
       <button type="submit" class="auth-btn" id="register-btn">注 册</button>
     </form>
@@ -33,7 +37,7 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="/static/js/api.js?v=6"></script>
-<script src="/static/js/register.js?v=6"></script>
+<script src="/static/js/api.js?v=7"></script>
+<script src="/static/js/register.js?v=7"></script>
 </body>
 </html>

@@ -31,6 +31,7 @@ import http.server
 import json
 import os
 import re
+import secrets
 import socketserver
 import sqlite3
 import sys
@@ -231,6 +232,12 @@ def _resolve_inside(root: Path, rel: str) -> Path | None:
 # ── 门户配置（缓存） ─────────────────────────────────────
 
 _portal_cfg_cache = {"mtime": 0.0, "data": {}}
+
+
+def _invite_required() -> bool:
+    """邀请码强制开关（需求2）。必须在 handler 内实时读 _portal_config()，
+    不能进 AuthStore 构造参数（AuthStore 在启动时构建，改 yaml 后不会重载）。"""
+    return bool((_portal_config().get("auth") or {}).get("invite_required"))
 
 
 def _portal_config() -> dict:
@@ -1067,6 +1074,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
 
         安全要点：只读 username/password 两个字段，role 等其余字段一律忽略，
         服务端强制 role='user'，前端无法注册管理员账号。
+        邀请码开关开启时（invite_required=true）：必须携带有效 invite_code，
+        消费失败统一 400「邀请码无效或已失效」并计入注册 IP 节流（防码枚举）。
         """
         ip = self.client_address[0] if self.client_address else "?"
         if not self._register_allowed(ip):
@@ -1078,6 +1087,26 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             return
         username = str(body.get("username") or "").strip()
         password = str(body.get("password") or "")
+        if _invite_required():
+            try:
+                status, msg, _uid = AUTH_STORE.register_with_invite(
+                    username, password, str(body.get("invite_code") or ""))
+            except sqlite3.Error:
+                self._serve_503()
+                return
+            if status == "duplicate":
+                self._serve_json({"error": msg}, status=409)
+                return
+            if status != "ok":
+                self._register_mark(ip)  # 邀请码/格式失败也计入节流（防暴力枚举）
+                self._serve_json({"error": msg}, status=400)
+                return
+            self._register_mark(ip)  # 成功注册计数
+            ua = self.headers.get("User-Agent", "")
+            AUTH_STORE.audit("REGISTER", username, ip, ua)
+            AUTH_STORE.write_event("REGISTER", "info", f"新用户注册成功: {username}（邀请码注册）")
+            self._serve_json({"ok": True, "message": "注册成功，请登录"}, status=201)
+            return
         try:
             status, msg = AUTH_STORE.register_user(username, password)
         except sqlite3.Error:
@@ -1123,6 +1152,21 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
                   f"鉴权: 失败 ip={ip} user={body['username']!r}", flush=True)
             self._serve_json({"error": "用户名或密码错误"}, status=401)
             return
+        # 邀请码强制开关：密码通过后校验与该账号绑定的邀请码（先猜对密码才可见此文案，
+        # 与「账号已停用」同防枚举姿态）；失败计入既有 (username, ip) 防爆破窗口。
+        if _invite_required():
+            try:
+                st, _msg = AUTH_STORE.verify_bound_for_login(
+                    user["id"], str(body.get("invite_code") or ""))
+            except sqlite3.Error:
+                self._serve_503()
+                return
+            if st != "ok":
+                AUTH_STORE.record_login_failure(body["username"], ip)
+                AUTH_STORE.audit("LOGIN_INVITE_FAIL", body["username"], ip, ua, detail=st)
+                self._serve_json(
+                    {"error": "邀请码无效或已失效，请联系管理员重新绑定"}, status=401)
+                return
         token, _csrf = AUTH_STORE.create_session(user["id"], ip, ua)
         ttl = (AUTH_STORE.admin_session_ttl_hours if user["role"] == "admin"
                else AUTH_STORE.session_ttl_hours)
@@ -1237,6 +1281,78 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         AUTH_STORE.write_event(event[0], event[1], event[2])
         self._serve_json({"ok": True, "message": msg})
 
+    def _handle_admin_invites_get(self):
+        """GET /api/admin/invites：邀请码列表（/api/admin/* 闸门已做 role==admin 校验）。"""
+        try:
+            invites = AUTH_STORE.list_invites()
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        self._serve_json({"invites": invites})
+
+    def _handle_admin_invites_post(self):
+        """POST /api/admin/invites：{action: create|revoke|rebind}，CSRF 必检。
+
+        create: {max_uses?, expires_at?, note?} → 服务端生成码 → 201 {ok, code}（明文仅此一次）
+        revoke: {id} → {ok}
+        rebind: {user_id} → 生成新码并绑定（旧有效绑定同时撤销）→ 201 {ok, code}
+        码明文绝不入库/日志；事件与审计只含前缀/编号。
+        """
+        if not self._check_csrf():
+            self._serve_json({"error": "CSRF 校验失败"}, status=403)
+            return
+        body = self._read_json_body()
+        if not body:
+            self._serve_json({"error": "参数不完整"}, status=400)
+            return
+        action = body.get("action")
+        actor = (self._user or {}).get("username", "?")
+        try:
+            if action == "create":
+                max_uses = int(body.get("max_uses") or 1)
+                if max_uses < 0 or max_uses > 10000:
+                    self._serve_json({"error": "max_uses 需在 0-10000"}, status=400)
+                    return
+                expires_at = body.get("expires_at") or None
+                note = str(body.get("note") or "")
+                code = secrets.token_urlsafe(9)
+                info = AUTH_STORE.create_invite(code, actor, max_uses=max_uses,
+                                                expires_at=expires_at, note=note)
+                if info is None:
+                    self._serve_json({"error": "邀请码创建失败，请重试"}, status=500)
+                    return
+                AUTH_STORE.write_event(
+                    "INVITE_CREATED", "info",
+                    f"{actor} 创建邀请码（前缀 {info['code_prefix']}，max_uses={max_uses}）")
+                self._serve_json({"ok": True, "code": code, "invite": info}, status=201)
+                return
+            if action == "revoke":
+                iid = body.get("id")
+                if not isinstance(iid, int):
+                    self._serve_json({"error": "参数不完整"}, status=400)
+                    return
+                if not AUTH_STORE.revoke_invite(iid, actor):
+                    self._serve_json({"error": "邀请码不存在或已撤销"}, status=400)
+                    return
+                self._serve_json({"ok": True})
+                return
+            if action == "rebind":
+                uid = body.get("user_id")
+                if not isinstance(uid, int):
+                    self._serve_json({"error": "参数不完整"}, status=400)
+                    return
+                code = secrets.token_urlsafe(9)
+                info = AUTH_STORE.rebind_invite(uid, code, actor)
+                if info is None:
+                    self._serve_json({"error": "用户不存在"}, status=400)
+                    return
+                self._serve_json({"ok": True, "code": code, "invite": info}, status=201)
+                return
+            self._serve_json({"error": "未知 action"}, status=400)
+        except sqlite3.Error:
+            self._serve_503()
+            return
+
     def do_GET(self):
         """路由分发（安全闸 → 会话闸门 → 路由）。"""
         path = unquote(self.path.split("?")[0])
@@ -1308,6 +1424,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_json({"audit": audit})
         elif path == "/api/admin/users":
             self._handle_admin_users_get()
+        elif path == "/api/admin/invites":
+            self._handle_admin_invites_get()
 
         # 门户 API
         elif path == "/api/files":
@@ -1388,6 +1506,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_change_password()
         elif path == "/api/admin/users":
             self._handle_admin_users_post()
+        elif path == "/api/admin/invites":
+            self._handle_admin_invites_post()
         elif path == "/api/admin/monthly-defaults":
             self._handle_admin_monthly_defaults_post()
         else:

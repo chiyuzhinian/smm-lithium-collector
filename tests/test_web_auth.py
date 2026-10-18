@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import sqlite3
 from datetime import timedelta
 
@@ -389,3 +390,101 @@ class TestMonthlyDefaultsStore:
         store.set_monthly_defaults(["al_a00"], "admin")
         store.set_monthly_defaults([], "admin")
         assert store.get_monthly_defaults() == []
+
+
+# ── 邀请码（需求2） ──────────────────────────────────
+
+class TestInviteCodes:
+    def test_create_invite_stores_hash_only(self, store):
+        info = store.create_invite("SECRET-CODE-1234", "admin", max_uses=2, note="n")
+        assert info and info["code_prefix"] == "SECR"
+        with store._conn() as conn:
+            row = conn.execute("SELECT * FROM invite_codes WHERE id=?", (info["id"],)).fetchone()
+            assert row["code_hash"] != "SECRET-CODE-1234"
+            assert "SECRET" not in row["code_hash"]
+            assert row["max_uses"] == 2 and row["used_count"] == 0
+
+    def test_register_with_invite_ok_binds_and_counts(self, store):
+        info = store.create_invite("INV-OK-0001", "admin", max_uses=3)
+        st, msg, uid = store.register_with_invite("newbie1", "pw-12345678", "INV-OK-0001")
+        assert st == "ok" and uid
+        with store._conn() as conn:
+            parent = conn.execute("SELECT * FROM invite_codes WHERE id=?", (info["id"],)).fetchone()
+            assert parent["used_count"] == 1
+            child = conn.execute("SELECT * FROM invite_codes WHERE bound_user_id=?", (uid,)).fetchone()
+            assert child and child["parent_id"] == info["id"]
+            user = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+            assert user["role"] == "user"
+
+    def test_register_with_invite_duplicate_username_does_not_consume(self, store):
+        info = store.create_invite("INV-DUP-0001", "admin")
+        store.create_user("taken", "pw-12345678")
+        st, msg, uid = store.register_with_invite("taken", "pw-12345678", "INV-DUP-0001")
+        assert st == "duplicate" and uid is None
+        with store._conn() as conn:
+            row = conn.execute("SELECT used_count FROM invite_codes WHERE id=?", (info["id"],)).fetchone()
+            assert row["used_count"] == 0
+
+    def test_register_with_invite_rejects_bad_revoked_expired_exhausted(self, store):
+        assert store.register_with_invite("user01", "pw-12345678", "NOPE")[0] == "bad_invite"
+        i2 = store.create_invite("INV-REV-0001", "admin")
+        store.revoke_invite(i2["id"], "admin")
+        assert store.register_with_invite("user02", "pw-12345678", "INV-REV-0001")[0] == "invite_revoked"
+        i3 = store.create_invite("INV-EXP-0001", "admin", expires_at="2020-01-01T00:00:00")
+        assert store.register_with_invite("user03", "pw-12345678", "INV-EXP-0001")[0] == "invite_expired"
+        i4 = store.create_invite("INV-EXH-0001", "admin", max_uses=1)
+        store.register_with_invite("user04", "pw-12345678", "INV-EXH-0001")
+        assert store.register_with_invite("user05", "pw-12345678", "INV-EXH-0001")[0] == "invite_exhausted"
+
+    def test_multi_use_code_shared_by_users(self, store):
+        """多用途码：多个用户共用（子行绑定各自用户）。"""
+        store.create_invite("INV-SHARE-01", "admin", max_uses=3)
+        st1, _, uid1 = store.register_with_invite("alice01", "pw-12345678", "INV-SHARE-01")
+        st2, _, uid2 = store.register_with_invite("bob00001", "pw-12345678", "INV-SHARE-01")
+        assert st1 == "ok" and st2 == "ok" and uid1 != uid2
+        assert store.verify_bound_for_login(uid1, "INV-SHARE-01")[0] == "ok"
+        assert store.verify_bound_for_login(uid2, "INV-SHARE-01")[0] == "ok"
+
+    def test_verify_bound_for_login_statuses(self, store):
+        info = store.create_invite("INV-BIND-001", "admin")
+        st, _, uid = store.register_with_invite("carl0001", "pw-12345678", "INV-BIND-001")
+        assert st == "ok"
+        assert store.verify_bound_for_login(uid, "INV-BIND-001")[0] == "ok"
+        assert store.verify_bound_for_login(uid, "WRONG-CODE")[0] == "invalid"
+        assert store.verify_bound_for_login(uid, "")[0] == "invalid"
+        # 无绑定用户
+        store.create_user("dan00001", "pw-12345678")
+        free = store.get_user("dan00001")
+        assert store.verify_bound_for_login(free["id"], "INV-BIND-001")[0] == "no_binding"
+        # 撤销后失效
+        store.revoke_invite(info["id"], "admin")
+        assert store.verify_bound_for_login(uid, "INV-BIND-001")[0] == "revoked"
+
+    def test_rebind_revokes_old_and_binds_new(self, store):
+        store.create_invite("INV-OLD-0001", "admin")
+        st, _, uid = store.register_with_invite("erin0001", "pw-12345678", "INV-OLD-0001")
+        assert st == "ok"
+        info = store.rebind_invite(uid, "INV-NEW-0001", "admin")
+        assert info
+        assert store.verify_bound_for_login(uid, "INV-OLD-0001")[0] in ("invalid", "no_binding", "revoked")
+        assert store.verify_bound_for_login(uid, "INV-NEW-0001")[0] == "ok"
+
+    def test_rebind_unknown_user_none(self, store):
+        assert store.rebind_invite(9999, "INV-X-00001", "admin") is None
+
+    def test_list_invites_no_hash_leak(self, store):
+        store.create_invite("INV-LIST-001", "admin", max_uses=2)
+        rows = store.list_invites()
+        assert rows
+        for r in rows:
+            assert "code_hash" not in r
+            assert "INV-LIST-001" not in json.dumps(r, ensure_ascii=False)
+
+    def test_ensure_schema_invite_and_defaults_idempotent(self, store):
+        store.ensure_schema()
+        store.ensure_schema()
+        with store._conn() as conn:
+            names = [r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        assert "invite_codes" in names
+        assert "monthly_default_products" in names
