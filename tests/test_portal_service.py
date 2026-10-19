@@ -865,3 +865,19 @@ def test_monthly_payload_calendar_products_defaults_to_products(db_path, product
         assert again["summary"] == full["summary"]
     finally:
         con.close()
+
+
+def test_history_from_default_clamps_to_2026_07_17(db_path, products):
+    """R1.1：from 缺省/早于 history_from 时钳到业务品种真实起点 2026-07-17。"""
+    con = ps.open_readonly(db_path)
+    try:
+        meta = {"history_from": ps.DEFAULT_HISTORY_FROM}  # 生产路径：file_server 传 yaml meta
+        payload = ps.history_payload(products, con, ["lfp_power_255"],
+                                     date_from=None, date_to=None, meta=meta)
+        assert payload["meta"]["date_from"] == "2026-07-17"
+        # 显式早于起点的日期同样被钳制
+        p2 = ps.history_payload(products, con, ["lfp_power_255"],
+                                date_from="2026-01-01", date_to=None, meta=meta)
+        assert p2["meta"]["date_from"] == "2026-07-17"
+    finally:
+        con.close()

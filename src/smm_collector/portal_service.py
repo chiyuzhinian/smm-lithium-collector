@@ -30,7 +30,7 @@ import yaml
 WEEKLY_REFERENCE_WEEKDAY = 4  # Friday
 
 # 门户日期范围下限（采集起点，见 business_products.yaml meta.history_from）
-DEFAULT_HISTORY_FROM = "2026-07-20"
+DEFAULT_HISTORY_FROM = "2026-07-17"
 
 # 环比百分比的舍入小数位（如 1.23%）
 MOM_PCT_PLACES = 2

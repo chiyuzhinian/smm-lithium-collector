@@ -409,8 +409,8 @@ function renderCharts() {
 
 /* 单 chart card 配置：min-max 区间带 + 当前指标线，独立 Y 轴 scale: true。
    V8：xAxis 改 time 轴（min/max=所选窗口，横轴覆盖完整选择区间），
-   数据为 [本地午夜时间戳, 值] 元组；仅绘制真实报价点（connectNulls:false），
-   指标线上 markPoint 标注首/末/高/低点（基于所绘指标非空点，随指标切换）。 */
+   数据为 [本地午夜时间戳, 值] 元组；仅绘制真实报价点（connectNulls:false）。
+   V9：移除首/末/高/低 markPoint 文字标注（业务要求，只保留悬停提示）。 */
 function buildCardOption(s, p) {
   const metric = tstate.metric;
   const { from, to } = currentWindow();
@@ -424,29 +424,6 @@ function buildCardOption(s, p) {
     metricLine.push([ts, mv]);
   }
   const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
-  /* 首/末/高/低：基于所绘指标非空点；单点/重合自动去重 */
-  const labeled = s.points
-    .map((pt) => ({ ts: localTs(pt.price_date),
-                    v: num(pt[metric === "avg" ? "average_price" : metric + "_price"]),
-                    date: pt.price_date }))
-    .filter((x) => x.v !== null);
-  const marks = [];
-  if (labeled.length) {
-    let hi = labeled[0], lo = labeled[0];
-    for (const x of labeled) {
-      if (x.v > hi.v) hi = x;
-      if (x.v < lo.v) lo = x;
-    }
-    const last = labeled[labeled.length - 1];
-    const seen = new Set();
-    for (const x of [{ name: "首点", ...labeled[0] }, { name: "末点", ...last },
-                     { name: "最高", ...hi }, { name: "最低", ...lo }]) {
-      const key = `${x.ts}|${x.v}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      marks.push({ name: x.name, coord: [x.ts, x.v], value: x.v, date: x.date });
-    }
-  }
   /* 窗口轴域：覆盖用户完整选择区间；单日窗口右边界 +1 天防塌缩 */
   const xMin = from ? localTs(from) : undefined;
   let xMax = to ? localTs(to) : undefined;
@@ -511,16 +488,7 @@ function buildCardOption(s, p) {
         lineStyle: { color: BRAND_BLUE, width: 2 },
         itemStyle: { color: BRAND_BLUE },
         symbol: "circle", symbolSize: 5,
-        z: 3,
-        markPoint: marks.length ? {
-          symbolSize: 30,
-          label: {
-            fontSize: 10,
-            formatter: (m) => `${m.name}\n${m.data.date}\n${priceText(m.data.value)}`,
-          },
-          itemStyle: { color: BRAND_BLUE },
-          data: marks,
-        } : undefined },
+        z: 3 },
     ],
   };
 }

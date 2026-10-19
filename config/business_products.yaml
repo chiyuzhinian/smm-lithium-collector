@@ -29,7 +29,7 @@ version: 1
 meta:
   name: "业务品种映射（月度业务报表 49 行版式）"
   template_sheet: "8月28日"
-  history_from: "2026-07-20"      # 采集起点；门户日期选择下限
+  history_from: "2026-07-17"      # 业务品种真实起点（电芯周频最早 07-17）；门户日期选择下限
   daily_completeness_ratio: 0.8   # 日频品种：当月报价日数/当月预期交易日数 ≥ 该值判完整
   weekly_completeness_ratio: 0.75 # 周频品种：当月报价点数/当月周数 ≥ 该值判完整
   monthly_method_note: "月均价=当月有效报价 average_price 算术平均（按报价点计，重复采集去重）；仅相邻两月均完整时计算环比"
