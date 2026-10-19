@@ -129,10 +129,13 @@
       <p class="section-note">生成邀请码供注册与登录使用（邀请码开关开启后强制校验）；同一码可按「可用次数」供多个用户使用。明文码只在生成时显示一次，请立即复制保存。用户码丢失/失效时可为其「重新绑定」。</p>
       <div class="panel" style="padding:10px 14px">
         <form id="invite-form" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <label>邀请码 <input id="invite-code" type="text" required autocomplete="off"
+                  minlength="6" maxlength="24" pattern="[A-Za-z0-9-]{6,24}"
+                  placeholder="6-24 位字母数字或连字符" style="width:200px"></label>
           <label>可用次数 <input id="invite-max-uses" type="number" min="0" max="10000" value="1" style="width:80px" title="0 = 不限次"></label>
           <label>有效期至 <input id="invite-expires" type="date" title="留空 = 永不过期"></label>
           <label>备注 <input id="invite-note" type="text" maxlength="100" placeholder="如：新同事入职"></label>
-          <button type="submit" class="btn btn-primary" id="invite-create-btn">生成邀请码</button>
+          <button type="submit" class="btn btn-primary" id="invite-create-btn">创建邀请码</button>
         </form>
         <div class="login-error" id="invite-code-box" hidden style="margin-top:8px"></div>
         <form id="invite-rebind-form" style="display:flex;gap:8px;align-items:center;margin-top:10px">

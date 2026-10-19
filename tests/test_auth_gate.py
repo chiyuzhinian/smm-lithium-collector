@@ -842,13 +842,14 @@ class TestInviteAdminApi:
         csrf = json.loads(request(env.port, "GET", "/api/auth/csrf",
                                   headers=cookie_header(cookie))["body"])["csrf_token"]
         r = request(env.port, "POST", "/api/admin/invites",
-                    json.dumps({"action": "create", "max_uses": 2, "note": "t"}),
+                    json.dumps({"action": "create", "code": "ADMIN-01",
+                                "max_uses": 2, "note": "t"}),
                     {**cookie_header(cookie), "Content-Type": "application/json",
                      "X-CSRF": csrf})
         assert r["status"] == 201
         j = json.loads(r["body"])
-        assert j["ok"] is True and j["code"]
-        assert j["invite"]["code_prefix"] == j["code"][:4]
+        assert j["ok"] is True and j["code"] == "ADMIN-01"
+        assert j["invite"]["code_prefix"] == "ADMI"
         g = request(env.port, "GET", "/api/admin/invites", headers=cookie_header(cookie))
         assert g["status"] == 200
         invites = json.loads(g["body"])["invites"]
@@ -865,7 +866,7 @@ class TestInviteAdminApi:
                                   headers=cookie_header(cookie))["body"])["csrf_token"]
         head = {**cookie_header(cookie), "Content-Type": "application/json", "X-CSRF": csrf}
         r1 = request(env.port, "POST", "/api/admin/invites",
-                     json.dumps({"action": "create"}), head)
+                     json.dumps({"action": "create", "code": "TMP-CODE-1"}), head)
         iid = json.loads(r1["body"])["invite"]["id"]
         r2 = request(env.port, "POST", "/api/admin/invites",
                      json.dumps({"action": "revoke", "id": iid}), head)
@@ -880,3 +881,37 @@ class TestInviteAdminApi:
         r4 = request(env.port, "POST", "/api/admin/invites",
                      json.dumps({"action": "rebind", "user_id": 9999}), head)
         assert r4["status"] == 400
+    def test_create_requires_valid_code(self, env):
+        """R4 校验：缺码/格式非法/重复码/坏日期均 400。"""
+        seed(env.store, "admin", role="admin")
+        _, cookie = login(env.port, "admin", "pw-123456")
+        csrf = json.loads(request(env.port, "GET", "/api/auth/csrf",
+                                  headers=cookie_header(cookie))["body"])["csrf_token"]
+        head = {**cookie_header(cookie), "Content-Type": "application/json", "X-CSRF": csrf}
+        # 缺码
+        r1 = request(env.port, "POST", "/api/admin/invites",
+                     json.dumps({"action": "create"}), head)
+        assert r1["status"] == 400
+        # 格式非法（含空格/中文/过短）
+        for bad in ("AB", "含中文码123", "ABC DEF", "a" * 25):
+            r = request(env.port, "POST", "/api/admin/invites",
+                        json.dumps({"action": "create", "code": bad}), head)
+            assert r["status"] == 400, bad
+        # 正常创建后重复码冲突
+        ok = request(env.port, "POST", "/api/admin/invites",
+                     json.dumps({"action": "create", "code": "DUP-CODE-1"}), head)
+        assert ok["status"] == 201
+        dup = request(env.port, "POST", "/api/admin/invites",
+                      json.dumps({"action": "create", "code": "DUP-CODE-1"}), head)
+        assert dup["status"] == 400
+        assert "冲突" in dup["body"]
+        # 坏日期格式
+        bad_d = request(env.port, "POST", "/api/admin/invites",
+                        json.dumps({"action": "create", "code": "DATE-CODE-1",
+                                    "expires_at": "2026/01/01"}), head)
+        assert bad_d["status"] == 400
+        # 备注超长
+        long_n = request(env.port, "POST", "/api/admin/invites",
+                         json.dumps({"action": "create", "code": "NOTE-CODE-1",
+                                     "note": "x" * 101}), head)
+        assert long_n["status"] == 400

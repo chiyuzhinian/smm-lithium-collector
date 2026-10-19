@@ -488,3 +488,14 @@ class TestInviteCodes:
                 "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         assert "invite_codes" in names
         assert "monthly_default_products" in names
+
+
+class TestInviteExists:
+    def test_exists_and_revoked(self, store):
+        assert store.invite_exists("EXIST-CODE-1") is False
+        store.create_invite("EXIST-CODE-1", "admin")
+        assert store.invite_exists("EXIST-CODE-1") is True
+        # 撤销后不再视为冲突
+        rows = store.list_invites()
+        store.revoke_invite(rows[0]["id"], "admin")
+        assert store.invite_exists("EXIST-CODE-1") is False

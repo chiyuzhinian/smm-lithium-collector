@@ -1309,13 +1309,29 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         actor = (self._user or {}).get("username", "?")
         try:
             if action == "create":
+                # R4：管理员手动指定邀请码内容（不再随机生成）
+                code = str(body.get("code") or "").strip()
+                if not re.fullmatch(r"[A-Za-z0-9-]{6,24}", code):
+                    self._serve_json(
+                        {"error": "邀请码需为 6-24 位字母、数字或连字符"}, status=400)
+                    return
                 max_uses = int(body.get("max_uses") or 1)
                 if max_uses < 0 or max_uses > 10000:
                     self._serve_json({"error": "max_uses 需在 0-10000"}, status=400)
                     return
                 expires_at = body.get("expires_at") or None
+                if expires_at is not None:
+                    if not isinstance(expires_at, str) or not re.fullmatch(
+                            r"\d{4}-\d{2}-\d{2}", expires_at):
+                        self._serve_json({"error": "有效期格式应为 YYYY-MM-DD"}, status=400)
+                        return
                 note = str(body.get("note") or "")
-                code = secrets.token_urlsafe(9)
+                if len(note) > 100:
+                    self._serve_json({"error": "备注不能超过 100 字"}, status=400)
+                    return
+                if AUTH_STORE.invite_exists(code):
+                    self._serve_json({"error": "邀请码与现有有效邀请码冲突"}, status=400)
+                    return
                 info = AUTH_STORE.create_invite(code, actor, max_uses=max_uses,
                                                 expires_at=expires_at, note=note)
                 if info is None:

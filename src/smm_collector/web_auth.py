@@ -395,6 +395,15 @@ class AuthStore:
         except sqlite3.IntegrityError:
             return None
 
+    def invite_exists(self, code: str) -> bool:
+        """是否存在未撤销的父码（手动设置邀请码时的冲突检查）。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM invite_codes WHERE code_hash=? AND parent_id IS NULL"
+                " AND revoked_at IS NULL LIMIT 1",
+                (_code_hash(code),)).fetchone()
+        return row is not None
+
     def list_invites(self) -> list[dict]:
         """邀请码列表（管理员视图）：父行 + 子行，绝不含 code_hash。"""
         with self._conn() as conn:

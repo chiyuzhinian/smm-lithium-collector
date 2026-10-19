@@ -476,16 +476,18 @@
   function bindInviteForms() {
     document.getElementById("invite-form").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const code = document.getElementById("invite-code").value.trim();
       const maxUses = Number(document.getElementById("invite-max-uses").value || "1");
       const expiresAt = document.getElementById("invite-expires").value || null;
       const note = document.getElementById("invite-note").value.trim();
       try {
         const data = await API.post("/api/admin/invites",
-          { action: "create", max_uses: maxUses, expires_at: expiresAt, note });
-        showInviteCode(data.code);
+          { action: "create", code, max_uses: maxUses, expires_at: expiresAt, note });
+        toast("邀请码已创建：" + code, "ok");
+        document.getElementById("invite-code").value = "";
         loadInvites();
       } catch (err) {
-        toast((err.data && err.data.error) || "生成失败", "");
+        toast((err.data && err.data.error) || "创建失败", "");
       }
     });
     document.getElementById("invite-rebind-form").addEventListener("submit", async (e) => {
