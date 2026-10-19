@@ -31,14 +31,8 @@ document.addEventListener("DOMContentLoaded", () => {
 </header>`;
     renderUserArea(page);
   }
-  const footEl = document.getElementById("footer");
-  if (footEl) {
-    footEl.outerHTML = `
-<div class="footer">
-  <div><b>锂电价格与回收业务数据中心</b> · 数据来源：SMM 上海有色网公开报价（采集器自动采集，采集时间与报价日期分别标注）</div>
-  <div>日均价为对应报价日期的 SMM 源字段；月均价为依据采集报价计算的期间算术平均，非 SMM 官方月均 · 涨红跌绿</div>
-</div>`;
-  }
+  /* R2：全站页脚说明已按业务要求移除（原 footer 注入块删除）；
+     各页面的 <div id="footer"> 占位保留为空，不渲染任何内容。 */
 });
 
 /* 用户区：未登录显示「登录」；admin 额外显示数据质量/运维中心 */

@@ -547,11 +547,13 @@ class TestBrandStrings:
         assert r["status"] == 200
         assert json.loads(r["body"])["banner"]["title"] == "锂电价格与回收业务数据中心"
 
-    def test_nav_js_brand_and_data_source(self, env):
+    def test_nav_js_brand_and_no_footer(self, env):
         r = request(env.port, "GET", "/static/js/nav.js")
         assert "锂电价格与回收业务数据中心" in r["body"]
         assert "SMM 锂电价格与回收业务数据中心" not in r["body"]
-        assert "数据来源：SMM 上海有色网公开报价" in r["body"]
+        # R2：全站页脚说明已移除，nav.js 不再注入任何页脚文字
+        assert "数据来源：SMM 上海有色网公开报价" not in r["body"]
+        assert "涨红跌绿" not in r["body"]
 
     def test_home_page_brand(self, env):
         seed(env.store, "huayou")
