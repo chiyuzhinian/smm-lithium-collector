@@ -138,25 +138,24 @@ function syncRangeUI() {
   }
 }
 
-/* 本地时区日期串（不用 toISOString——UTC 转换在东八区会偏前一天） */
-function localDateStr(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/* 日期串 → 本地午夜时间戳（ECharts time 轴坐标） */
-function localTs(dateStr) {
-  return new Date(dateStr + "T00:00:00").getTime();
-}
-
+/* 取窗口径（2026-10-19 确认）：
+   - custom：用户所选区间，后端 from/to 已过滤真实点
+   - 7d/1m：每产品各自截至最新有效报价日、向前取最近 7/30 个「有数据点的报价日」
+   （按有数据点计数，不是自然日；不足 N 个显示实际有的；绝不补点/插值） */
 function currentWindow() {
-  if (tstate.range === "custom") return { from: tstate.from, to: tstate.to };
-  const to = tstate.dbLatest;
-  if (!to) return { from: null, to: null };
-  const days = tstate.range === "7d" ? 7 : 30;
-  const d = new Date(to + "T00:00:00");
-  d.setDate(d.getDate() - (days - 1));
-  const from = localDateStr(d);
-  return { from: from < (tstate.historyFrom || from) ? (tstate.historyFrom || from) : from, to };
+  if (tstate.range === "custom") return { mode: "custom", from: tstate.from, to: tstate.to };
+  return { mode: "lastN", n: tstate.range === "7d" ? 7 : 30 };
+}
+
+/* 对每个产品应用窗口（多产品各产品独立取窗，不跨产品对齐） */
+function applyWindow(seriesList) {
+  const win = currentWindow();
+  if (win.mode !== "lastN") return seriesList;   // custom：后端已过滤
+  return seriesList.map((s) => {
+    const pts = s.points || [];
+    const sliced = pts.length > win.n ? pts.slice(pts.length - win.n) : pts;
+    return Object.assign({}, s, { points: sliced });
+  });
 }
 
 /* ── 产品选择 ── */
@@ -227,14 +226,27 @@ function chipColor(id) {
 
 /* 图表头：指标/单位/时间范围 + 已选产品图例 */
 function updateChartHead() {
-  const { from, to } = currentWindow();
+  const win = currentWindow();
   const units = [...new Set(tstate.series.map((s) => s.unit).filter(Boolean))];
   const unit = units.length === 1 ? units[0] : (units.length > 1 ? "多单位" : "");
   const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
   const label = tstate.selected.length === 1 ? metricNames[tstate.metric] : `${tstate.selected.length} 个产品独立走势`;
+  let rangeText;
+  if (win.mode === "lastN") {
+    rangeText = `近 ${win.n} 个报价日`;
+    // 单产品时补充该产品窗口内实际首末报价日期
+    if (tstate.selected.length === 1 && tstate.series.length === 1) {
+      const pts = tstate.series[0].points || [];
+      if (pts.length) {
+        rangeText += `（${pts[0].price_date} ~ ${pts[pts.length - 1].price_date}）`;
+      }
+    }
+  } else {
+    rangeText = win.from && win.to ? `${win.from} ~ ${win.to}` : "—";
+  }
   document.getElementById("chart-metric-label").textContent = label;
   document.getElementById("chart-range-label").textContent =
-    `${unit ? unit + " · " : ""}${from && to ? from + " ~ " + to : "—"}`;
+    `${unit ? unit + " · " : ""}${rangeText}`;
 }
 
 /* 摘要：期末日均价 + 区间变化 + 无历史价格产品 + 多单位提示 */
@@ -317,14 +329,18 @@ function renderChips() {
 
 async function loadData() {
   if (!tstate.selected.length) { tstate.series = []; return; }
-  const { from, to } = currentWindow();
+  const win = currentWindow();
   const params = new URLSearchParams();
   params.set("ids", tstate.selected.join(","));
-  if (from) params.set("from", from);
-  if (to) params.set("to", to);
+  // lastN（7d/1m）：不传 from/to，拉全历史后由 applyWindow 按「有数据点」取窗；
+  // custom：传区间，后端按真实点过滤
+  if (win.mode === "custom") {
+    if (win.from) params.set("from", win.from);
+    if (win.to) params.set("to", win.to);
+  }
   try {
     const data = await API.get("/api/portal/history?" + params.toString(), 10000);
-    tstate.series = data.series || [];
+    tstate.series = applyWindow(data.series || []);
   } catch (err) {
     notify("走势数据加载失败：" + err.message, "error");
     tstate.series = [];
@@ -338,16 +354,17 @@ function num(v) {
   return isFinite(n) ? n : null;
 }
 
-/* X 轴日期标签：同年 MM-DD，跨年 YYYY-MM-DD（time 轴收到时间戳） */
+/* X 轴日期标签：同年 MM-DD，跨年 YYYY-MM-DD（category 轴收到日期字符串） */
 function axisDateFormatter() {
-  const { from, to } = currentWindow();
-  const crossYear = from && to && from.slice(0, 4) !== to.slice(0, 4);
-  return (ts) => {
-    const d = new Date(ts);
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return crossYear ? `${d.getFullYear()}-${mm}-${dd}` : `${mm}-${dd}`;
-  };
+  const win = currentWindow();
+  let crossYear = false;
+  if (win.mode === "custom" && win.from && win.to) {
+    crossYear = win.from.slice(0, 4) !== win.to.slice(0, 4);
+  } else {
+    const all = tstate.series.flatMap((s) => (s.points || []).map((p) => p.price_date));
+    if (all.length > 1) crossYear = all[0].slice(0, 4) !== all[all.length - 1].slice(0, 4);
+  }
+  return (v) => (crossYear ? v : String(v).slice(5));
 }
 
 /* 销毁旧 chart 实例 */
@@ -408,26 +425,22 @@ function renderCharts() {
 }
 
 /* 单 chart card 配置：min-max 区间带 + 当前指标线，独立 Y 轴 scale: true。
-   V8：xAxis 改 time 轴（min/max=所选窗口，横轴覆盖完整选择区间），
-   数据为 [本地午夜时间戳, 值] 元组；仅绘制真实报价点（connectNulls:false）。
-   V9：移除首/末/高/低 markPoint 文字标注（业务要求，只保留悬停提示）。 */
+   V8：xAxis 曾改 time 轴（min/max=所选窗口）；V9 移除 markPoint。
+   V10（2026-10-19 确认口径）：xAxis 回归 category 轴，横轴只列真实报价日期
+   （无数据日期不出现在轴上）；axisLabel hideOverlap+auto 抽稀修复标签重叠；
+   数据为标量数组（与 category 轴 data 一一对应）。 */
 function buildCardOption(s, p) {
   const metric = tstate.metric;
-  const { from, to } = currentWindow();
+  const dates = s.points.map((pt) => pt.price_date);
   const bandMin = [], bandDiff = [], metricLine = [];
   for (const pt of s.points) {
-    const ts = localTs(pt.price_date);
     const lo = num(pt.min_price), hi = num(pt.max_price),
           mv = num(pt[metric === "avg" ? "average_price" : metric + "_price"]);
-    bandMin.push([ts, lo ?? null]);
-    bandDiff.push([ts, lo !== null && hi !== null ? hi - lo : null]);
-    metricLine.push([ts, mv]);
+    bandMin.push(lo ?? null);
+    bandDiff.push(lo !== null && hi !== null ? hi - lo : null);
+    metricLine.push(mv);
   }
   const metricNames = { avg: "日均价", min: "最低价", max: "最高价" };
-  /* 窗口轴域：覆盖用户完整选择区间；单日窗口右边界 +1 天防塌缩 */
-  const xMin = from ? localTs(from) : undefined;
-  let xMax = to ? localTs(to) : undefined;
-  if (from && to && from === to && xMin === xMax) xMax = xMax + 86400000;
   return {
     grid: { left: 12, right: 24, top: 16, bottom: 8, containLabel: true },
     tooltip: {
@@ -463,12 +476,14 @@ function buildCardOption(s, p) {
       },
     },
     xAxis: {
-      type: "time",
-      min: xMin,
-      max: xMax,
+      type: "category",
+      boundaryGap: ["3%", "3%"],
+      data: dates,
       axisLine: { lineStyle: { color: CHART.axis } },
       axisTick: { show: false },
-      axisLabel: { color: CHART.label, fontSize: 11, formatter: axisDateFormatter() },
+      // hideOverlap + auto 抽稀：长区间标签密集时自动隐藏部分标签防重叠（不删真实数据点）
+      axisLabel: { color: CHART.label, fontSize: 11,
+                   formatter: axisDateFormatter(), interval: "auto", hideOverlap: true },
     },
     yAxis: {
       type: "value", scale: true,     // 关键：每张图独立 Y 轴，按自身数据范围缩放

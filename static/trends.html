@@ -81,8 +81,8 @@
     <summary>数据口径与说明</summary>
     <div class="caliber-body">
       <div><b>区间带</b>为同报价日期「最低—最高价」，非置信区间；曲线为所选指标（日均价/最低价/最高价）。</div>
-      <div><b>真实时间轴</b>：缺报日期不补点、不插值、不填 0；周报价品种按实际发布报价点绘制。</div>
-      <div><b>区间变化</b> = 所选区间内首、末有效报价的差值（按实际报价日期，非源字段当日涨跌）；数据不足时显示「—」。</div>
+      <div><b>横轴</b>仅列出真实报价日期：缺报日期不补点、不插值、不填 0；周报价品种按实际发布报价点绘制。近 7 天 / 近 1 月 = 每产品各自最近 7 / 30 个有数据点的报价日。</div>
+      <div><b>区间变化</b> = 所选范围内首、末有效报价的差值（按实际报价日期，非源字段当日涨跌）；数据不足时显示「—」。</div>
       <div><b>多产品对比</b>：不限制产品数量；≤2 种单位自动分左右双坐标轴（右轴标注单位），超过 2 种单位仅并列展示并提示数值不可直接比较。</div>
       <div><b>Tooltip</b> 展示完整报价日期（YYYY-MM-DD）与同一条采集记录的最低/最高/日均价与涨跌。</div>
     </div>
@@ -97,6 +97,6 @@
 <script src="/static/js/api.js?v=6"></script>
 <script src="/static/js/common.js?v=6"></script>
 <script src="/static/js/nav.js?v=7"></script>
-<script src="/static/js/trends.js?v=8"></script>
+<script src="/static/js/trends.js?v=9"></script>
 </body>
 </html>
