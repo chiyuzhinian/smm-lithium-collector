@@ -610,6 +610,22 @@ class TestHistoryDownload:
         assert r["status"] == 200
         assert r["headers"]["content-disposition"].startswith("attachment")
 
+    def test_full_history_download_clamps_to_history_from(self, env):
+        """R3 全部历史下载：不传 from/to → 文件名回显钳制后的 history_from（07-17）。"""
+        if not (env.root / "config").exists():
+            shutil.copytree(Path(__file__).resolve().parents[1] / "config",
+                            env.root / "config")
+        env.mod._business_cache.update({"path": None, "mtime": 0.0,
+                                        "products": [], "meta": {}})
+        _ensure_price_table(env.root)
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = request(env.port, "GET", "/api/portal/history/download",
+                    headers=cookie_header(cookie))
+        assert r["status"] == 200
+        cd = r["headers"]["content-disposition"]
+        assert unquote(cd).endswith("历史价格_2026-07-17_至今.xlsx")
+
 
 # ── 月报默认产品清单（需求5） ──────────────────────────
 

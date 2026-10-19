@@ -105,7 +105,7 @@ function bindDataset() {
     setupDateDefaults();
     await searchDataset();
   });
-  /* 下载 Excel：与 searchDataset 完全同源的产品/日期口径（ids 空=全部业务品种） */
+  /* 下载 ① 按当前筛选：与 searchDataset 同源的产品/日期口径（ids 空=全部业务品种） */
   document.getElementById("ds-download").addEventListener("click", () => {
     const ids = rstate.ds.picked.length
       ? rstate.ds.picked
@@ -114,6 +114,16 @@ function bindDataset() {
     params.set("ids", ids.join(","));
     if (rstate.ds.from) params.set("from", rstate.ds.from);
     if (rstate.ds.to) params.set("to", rstate.ds.to);
+    window.open("/api/portal/history/download?" + params.toString(), "_blank");
+  });
+  /* 下载 ② 全部历史：仅传产品选择，不传 from/to
+     （后端 from 缺省钳 history_from、to 缺省=至今 → 各产品最早有效报价日至今天） */
+  document.getElementById("ds-download-all").addEventListener("click", () => {
+    const ids = rstate.ds.picked.length
+      ? rstate.ds.picked
+      : rstate.ds.products.map((p) => p.id);
+    const params = new URLSearchParams();
+    params.set("ids", ids.join(","));
     window.open("/api/portal/history/download?" + params.toString(), "_blank");
   });
 }

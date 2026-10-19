@@ -51,7 +51,8 @@
       <div class="btn-group">
         <button class="btn primary" id="ds-search">查询</button>
         <button class="btn ghost" id="ds-reset">重置</button>
-        <button class="btn ghost" id="ds-download" title="按当前产品与日期范围下载全部历史报价（不受查询区任何限制）">下载 Excel</button>
+        <button class="btn ghost" id="ds-download" title="按上方所选产品与日期范围导出（与查询结果同口径）">按当前筛选下载</button>
+        <button class="btn ghost" id="ds-download-all" title="忽略日期选择：全部产品（未选时=40 个业务品种）从各自最早有效报价日至今天的完整历史">全部历史下载</button>
       </div>
       <div class="chips-row" id="ds-prod-chips"></div>
       <div class="result-count" id="ds-count">—</div>
@@ -106,6 +107,6 @@
 <script src="/static/js/api.js?v=6"></script>
 <script src="/static/js/common.js?v=6"></script>
 <script src="/static/js/nav.js?v=7"></script>
-<script src="/static/js/reports.js?v=8"></script>
+<script src="/static/js/reports.js?v=9"></script>
 </body>
 </html>
