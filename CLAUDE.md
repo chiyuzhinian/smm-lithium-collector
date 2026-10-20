@@ -29,10 +29,10 @@
 | collection_runs | 2026-10-12 **success**（40 分类 447 行；PACK 页面缺失 → 固定汇总 temp_snapshot 正常机制） |
 | 每日验证 | 2026-10-12 **WARNING**（无 FAIL） |
 | 门户账号 | 7 用户（含 huayou/admin），库 `/var/lib/smm-fileserver/auth.db`（备份迁移，密码哈希原样保留） |
-| 钉钉 | 已配置；`FILE_HOST=http://101.37.235.13`（无端口，经 nginx 80） |
-| Git 分支 | 生产部署于 **feature/aliyun-migration-2026-10**（= 迁移分支 + 4 个迁移修复提交：deploy 脚本修正 / file_server 绑定 127.0.0.1 / V2 脚本 sys.path / requirements 补 pymysql）；原迁移基线 feature/server-migration-2026-09-29；生产历史分支 feature/smm-auth-v2；`main` 落后勿操作 |
+| 钉钉 | 已配置；`FILE_HOST=http://101.37.235.13`（无端口，经 nginx 80）；日报为**业务报价日报**（采集概况 + 40 种业务产品分类明细 + 2 个下载链接），正文不再展示 MySQL 统计 |
+| Git 分支 | 生产部署于 **feature/dingtalk-business-report-2026-10**（a927487，= 迁移分支 + 门户/认证/趋势 R1-R4 + 钉钉业务日报 4 提交）；原生产分支 feature/aliyun-migration-2026-10（fbca17d 为部署前回滚点，备份在服务器 backups/dingtalk-report-pre-20261020/）；`main` 落后勿操作 |
 | 代码更新通道 | 服务器直连 GitHub 超时 → 本地 commit+push → `git bundle` → scp → 服务器 `git pull bundle` |
-| 测试 | **466 passed**（服务器 venv 全量；本地 Windows 因 fcntl/Unix 权限模型不能作为测试基准） |
+| 测试 | **541 passed**（2026-10-20 服务器 venv 全量，0 failed；本地 Windows 因 fcntl/Unix 权限模型不能作为测试基准，全量需 --ignore=tests/test_profile_lock.py） |
 | 迁移报告 | `docs/deployment/aliyun-migration-2026-10/`（01~09 全部交付文档） |
 
 ### 文档现状（哪些可信）
@@ -92,6 +92,12 @@
 │   ├── exporter.py              # 每日 Excel/CSV + 固定汇总门控 + update_summaries
 │   ├── additional_sources.py    # 附加数据源（SMM铝/铜/镍现货，升贴水表已排除）
 │   ├── business_report.py       # 规范日报生成（映射配置 → 11 列报表）
+│   ├── business_daily.py        # ⭐ 钉钉业务报价日报数据层（40 产品，与门户共用
+│   │                            #   portal_service 口径：新报价判定/缺失标注/消息渲染/
+│   │                            #   Excel 导出/签名下载链接；只读不写库）
+│   ├── dl_link.py               # 公开下载链接签名（HMAC 路径绑定+限时；/dl/ 路由共用）
+│   ├── notifier.py              # 钉钉传输层（webhook 加签 + 3 次重试 + run_id 防重 +
+│   │                            #   DINGTALK_DRY_RUN 预览；文案由 business_daily 生成）
 │   ├── daily_validation.py      # 每日 9 层数据验证（只读，写 logs/validation/）
 │   ├── data_quality.py          # 质量报告 JSON + 每日数据状态 manifest
 │   ├── mysql_database.py / synchronizer.py  # MySQL 建表/批量 upsert/重试/同步编排
@@ -264,6 +270,9 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
   `/api/auth/*`(login/logout/me/csrf/register/change-password)
   `/api/admin/*`(overview/users/logs/tasks/events/errors/data-quality/audit)
   `/health`
+- **公开签名下载**：`GET /dl/{sig}/{exp}/{path}`（钉钉日报 Excel 免登录限时链接；
+  密钥 /var/lib/smm-fileserver/dl_sign.key 0640 root:smmweb，FILE_DL_KEY 可覆盖；
+  验签失败一律 404；密钥缺失时钉钉链接自动回退登录式）
 - 服务端强制 role=user 注册；管理员用户管理：停用/启用/重置密码/软删除
 
 ## 8. 开发规范
@@ -320,6 +329,7 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 | ✅ 门户账号体系 | 表单登录+Session+CSRF+防爆破+注册(强制 user)+管理员用户管理 |
 | ✅ 运维中心 | 系统资源/采集任务/验证结果/事件/错误日志查看 |
 | ✅ 业务报告 | 规范日报（11 列，映射配置）+ 领导汇报 + 市场价格报表 |
+| ✅ 钉钉业务日报 | 采集概况 + 40 种业务产品分类明细 + 双下载链接（2026-10-20 部署）；与门户共用映射/口径；发送重试+防重+DRY_RUN |
 | ✅ 兜底补采 | 9:30 重试 + @reboot 开机补采 + flock 互斥锁 |
 | ✅ 汇总重建 | rebuild_summaries.py 从 SQLite 全量重建 + 缺口回补 |
 | ✅ 一键部署 | deploy_server.sh + setup_systemd.sh + secure_fileserver.sh |
