@@ -23,6 +23,7 @@
   GET /api/trends    → 趋势序列（SQLite 只读查询）
   GET /api/quality   → 数据质量面板（仅管理员）
   GET /api/topics    → 业务专题（回收链重点）
+  GET /dl/{sig}/{exp}/{path} → 公开签名文件下载（钉钉日报 Excel，免登录限时，exports 根内）
   GET /*             → 文件下载 / 目录浏览（exports 根内，需登录）
 """
 from __future__ import annotations
@@ -1378,6 +1379,11 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(403, "Forbidden")
             return
 
+        # 公开签名下载（钉钉日报 Excel 链接；免登录、限时、路径绑定；密钥缺失/验签失败 → 404）
+        if path.startswith("/dl/"):
+            self._serve_public_download(path)
+            return
+
         # 第二道闸门：会话鉴权（公开路径放行；其余必须登录）
         if not self._session_gate():
             return
@@ -1606,6 +1612,35 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
+
+    def _serve_public_download(self, path: str):
+        """GET /dl/{sig}/{exp}/{relpath}：公开签名文件下载（钉钉日报 Excel）。
+
+        签名 = HMAC-SHA256(key, f"{relpath}|{exp}")（见 smm_collector.dl_link）。
+        验签通过后仍走 _serve_file 的全部安全校验（穿越/黑名单/扩展名白名单），
+        服务范围仅限 exports 根。密钥缺失或验签失败一律 404，不泄露文件存在性。
+        """
+        from smm_collector import dl_link
+        key = dl_link.load_key()
+        if not key:
+            self.send_error(404, "Not Found")
+            return
+        parts = path.split("/", 4)
+        if len(parts) != 5 or parts[1] != "dl":
+            self.send_error(404, "Not Found")
+            return
+        _sig, _exp, relpath = parts[2], parts[3], parts[4]
+        try:
+            exp = int(_exp)
+        except ValueError:
+            self.send_error(404, "Not Found")
+            return
+        if not dl_link.verify(_sig, exp, relpath, key):
+            self.send_error(404, "Not Found")
+            return
+        # 父类 SimpleHTTPRequestHandler 按 self.path 解析文件，改为签名绑定的相对路径
+        self.path = "/" + relpath
+        self._serve_file(relpath)
 
     def _serve_file(self, path: str):
         """文件下载或目录浏览（exports 根内）。"""

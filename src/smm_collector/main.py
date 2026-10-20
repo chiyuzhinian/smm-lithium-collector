@@ -220,11 +220,36 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 				generate_daily_report(meta, sync_stats, cfg.path("export_dir"))
 			except Exception: log.exception("MySQL同步异常")
 	log.info("状态=%s db=%s sync=%s", meta["status"], stats, sync_stats.get("status") if sync_stats else "未执行")
-	# 钉钉
+	# 钉钉业务日报（采集概况 + 40 种业务产品报价 + 下载链接；只读展示层）
+	# 与网站每日报价共用同一映射（business_products.yaml）与同一查询口径（portal_service）。
+	# 生成/发送失败只记日志与事件，绝不影响采集与入库结果；dry-run 不构建不发送。
 	try:
-		from .notifier import send_daily_notification
-		await send_daily_notification(meta, sync_stats, str(cfg.path("database_path")))
-	except Exception: pass
+		if dry_run:
+			log.info("dry-run：跳过钉钉业务日报（不构建不发送）")
+		else:
+			from .business_daily import build_report, load_products, export_quotes_xlsx
+			from .portal_service import open_readonly
+			from .notifier import send_daily_notification
+			report_rows = None
+			products, pmeta = load_products(cfg.root)
+			if products:
+				con = None
+				try:
+					con = open_readonly(cfg.path("database_path"))
+					report_rows = build_report(products, con,
+						meta.get("data_date") or str(target_date), meta.get("started_at"))
+				finally:
+					if con is not None:
+						con.close()
+				if report_rows:
+					xlsx = export_quotes_xlsx(report_rows, cfg.path("export_dir"), target_date)
+					log.info("业务产品报价Excel: %s", xlsx)
+					_ops_event("DINGTALK_REPORT_BUILT", "info",
+						f"业务日报构建 target_date={target_date} data_date={meta.get('data_date')} rows={len(report_rows)}")
+			await send_daily_notification(meta, report_rows)
+	except Exception:
+		log.exception("钉钉业务日报生成/发送失败（不影响采集结果）")
+		_ops_event("DINGTALK_REPORT_BUILD_FAILED", "error", "钉钉业务日报生成/发送异常")
 	_ops_event("COLLECTOR_FINISHED",
 		"info" if meta["status"]=="success" else "warning",
 		f"采集结束 status={meta['status']} rows={meta.get('total_clean_rows')}")

@@ -73,3 +73,12 @@ def recent_events(limit: int = 50, path: str | None = None) -> list[dict]:
         return [dict(r) for r in rows]
     except Exception:
         return []
+
+
+def has_event(event_type: str, needle: str, limit: int = 30,
+              path: str | None = None) -> bool:
+    """最近 limit 条事件中是否存在 event_type 且 message 含 needle（钉钉发送防重用）。"""
+    for e in recent_events(limit, path=path):
+        if e.get("event_type") == event_type and needle in (e.get("message") or ""):
+            return True
+    return False
