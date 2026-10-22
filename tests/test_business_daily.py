@@ -213,8 +213,8 @@ def test_message_top_summary_no_mysql(db_path, products, signed_env):
     assert "**采集结果**：39/40 类别成功" in msg
     assert "**全量数据**：450 条" in msg
     assert "**失败类目**：PACK" in msg
-    assert "【40 种重点业务产品报价】" in msg
-    assert "目标产品：40 种 ｜ 本次有效新报价：1 种 ｜ 本次无新报价：39 种" in msg
+    assert "【重点业务产品报价】" in msg
+    assert "目标产品：38 种 ｜ 本次有效新报价：1 种 ｜ 本次无新报价：37 种" in msg
     # 场景 I：绝不出现 MySQL/新增/更新技术统计
     for banned in ("MySQL", "新增", "更新"):
         assert banned not in msg
@@ -224,13 +224,13 @@ def test_message_group_order_and_coverage(db_path, products, signed_env):
     texts = _message(db_path, products, signed_env)
     msg = texts[0]
     order = ["一、基础金属（3）", "二、金属（2）", "三、金属盐（4）", "四、废极片（2）",
-             "五、黑粉（7）", "六、正极材料（16）", "七、新电芯（6）"]
+             "五、黑粉（7）", "六、正极材料（14）", "七、新电芯（6）"]
     pos = -1
     for head in order:
         i = msg.index(head)
         assert i > pos, head
         pos = i
-    assert msg.count("- **") == 40  # 40 产品全覆盖
+    assert msg.count("- **") == 38  # 40 产品中隐藏 2 个无报价储能型
 
 
 def test_message_missing_line_formats(db_path, products, signed_env):
@@ -241,11 +241,26 @@ def test_message_missing_line_formats(db_path, products, signed_env):
     assert "涨跌 -200" in msg
 
 
-def test_message_download_links_signed(db_path, products, signed_env):
+def test_message_no_download_section(db_path, products, signed_env):
     msg = _message(db_path, products, signed_env)[0]
-    assert "【数据下载】" in msg
-    assert "[下载今日40种业务产品报价](http://t.example/dl/" in msg
-    assert "[下载当日全量采集数据](http://t.example/dl/" in msg
+    assert "【数据下载】" not in msg
+    assert "📥" not in msg
+    assert "/dl/" not in msg
+
+
+def test_message_title_without_smm_prefix(db_path, products, signed_env):
+    msg = _message(db_path, products, signed_env)[0]
+    assert msg.startswith("## ✅ 锂电价格采集日报")
+    assert "SMM 锂电价格采集日报" not in msg
+
+
+def test_hidden_ess_products_omitted(db_path, products, signed_env):
+    msg = _message(db_path, products, signed_env)[0]
+    assert "储能型压实密度≥2.5" not in msg  # lfp_ess_250 隐藏
+    assert "储能型压实密度≥2.4" not in msg  # lfp_ess_240 隐藏
+    assert "储能型压实密度≥2.3" in msg      # lfp_ess_230（有绑定系列）不受影响
+    assert "动力型压实密度≥2.5" in msg      # 同名动力型产品不受影响
+    assert "动力型压实密度≥2.4" in msg
 
 
 def test_message_data_date_note_when_different(db_path, products, signed_env):
@@ -259,11 +274,11 @@ def test_message_split_covers_all_products(db_path, products, signed_env, monkey
     texts = bd.render_dingtalk_message(META, _report(db_path, products))
     assert len(texts) > 1
     joined = "\n".join(texts)
-    assert joined.count("- **") == 40  # 零丢失、零重复
+    assert joined.count("- **") == 38  # 零丢失、零重复（隐藏 2 个无报价储能型）
     assert texts[0].startswith("（1/")
     assert texts[-1].startswith(f"（{len(texts)}/{len(texts)}）")
     assert "【采集概况】" in texts[0]
-    assert "【数据下载】" in texts[-1]
+    assert "【数据下载】" not in joined
     # 分组标题跨消息出现且只出现一次、顺序不变
     heads = ["一、基础金属", "二、金属", "三、金属盐", "四、废极片",
              "五、黑粉", "六、正极材料", "七、新电芯"]
@@ -278,7 +293,8 @@ def test_message_split_covers_all_products(db_path, products, signed_env, monkey
 def test_message_fallback_without_rows(signed_env):
     texts = bd.render_dingtalk_message(META, [])
     assert len(texts) == 1
-    assert "【40 种重点业务产品报价】" not in texts[0]
+    assert "【重点业务产品报价】" not in texts[0]
+    assert "【数据下载】" not in texts[0]
     assert "【采集概况】" in texts[0]
 
 

@@ -220,7 +220,7 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 				generate_daily_report(meta, sync_stats, cfg.path("export_dir"))
 			except Exception: log.exception("MySQL同步异常")
 	log.info("状态=%s db=%s sync=%s", meta["status"], stats, sync_stats.get("status") if sync_stats else "未执行")
-	# 钉钉业务日报（采集概况 + 40 种业务产品报价 + 下载链接；只读展示层）
+	# 钉钉业务日报（采集概况 + 重点业务产品报价；只读展示层）
 	# 与网站每日报价共用同一映射（business_products.yaml）与同一查询口径（portal_service）。
 	# 生成/发送失败只记日志与事件，绝不影响采集与入库结果；dry-run 不构建不发送。
 	try:
@@ -231,7 +231,7 @@ async def collect(target_date: date, category=None, headed=False, dry_run=False,
 			from .portal_service import open_readonly
 			from .notifier import send_daily_notification
 			report_rows = None
-			products, pmeta = load_products(cfg.root)
+			products, pmeta = load_products(cfg.root / "config")
 			if products:
 				con = None
 				try:

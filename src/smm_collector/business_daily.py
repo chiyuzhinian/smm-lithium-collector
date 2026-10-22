@@ -11,21 +11,18 @@
   - unavailable_merged（无绑定系列）恒为「历史暂无有效报价」。
 
 消息长度：钉钉 markdown 上限 20KB；单条超 MAX_MESSAGE_CHARS 时按业务类别
-拆分为连续多条（采集概况在首条、下载链接在末条），产品零丢失。
+拆分为连续多条（采集概况在首条），产品零丢失。
 """
 from __future__ import annotations
 
 import logging
 import os
-import socket
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
-from . import dl_link
 from . import portal_service as ps
 
 log = logging.getLogger("smm_collector.business_daily")
@@ -49,6 +46,10 @@ _STATUS_TEXT = {
     STATUS_MISSING: "本次无新报价",
     STATUS_NO_HISTORY: "本次无新报价，历史暂无有效报价",
 }
+
+# 钉钉日报不展示的产品（用户确认 2026-10-22：现阶段不展示；日后如需恢复由用户自行修改此列表）。
+# 只按稳定 ID 过滤：绝不用 display_name（储能型与动力型同名）或 mapping_status（可能误伤未来产品）。
+HIDDEN_PRODUCT_IDS = ("lfp_ess_250", "lfp_ess_240")
 
 
 # ── 数据读取（复用 portal_service 口径） ─────────────────────────
@@ -184,59 +185,9 @@ def _product_line(r: dict) -> str:
     return f"- **{name}**：本次无新报价，历史暂无有效报价"
 
 
-def _file_host() -> str:
-    """下载链接主机：FILE_HOST → ngrok → 局域网 IP（与旧 notifier 逻辑一致）。"""
-    fh = os.getenv("FILE_HOST", "")
-    if fh:
-        return fh
-    try:
-        import json as _j
-        import urllib.request
-        r = urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=3)
-        for t in _j.loads(r.read()).get("tunnels", []):
-            if t.get("proto") == "https":
-                return t["public_url"]
-    except Exception:
-        pass
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        fh = f"http://{s.getsockname()[0]}:8888"
-        s.close()
-        return fh
-    except Exception:
-        return ""
-
-
-def _dl_url(td: str, filename: str) -> str:
-    """优先公开签名链接（免登录限时）；密钥缺失回退登录式链接。"""
-    fh = _file_host()
-    if not fh or not td or len(td) < 10:
-        return ""
-    relpath = f"{td[:4]}/{td[5:7]}/每日汇总/Excel/{filename}"
-    signed = dl_link.make_url(fh, relpath)
-    if signed:
-        return signed
-    return f"{fh.rstrip('/')}/{quote(relpath, safe='/')}"
-
-
-def _download_lines(td: str) -> list[str]:
-    lines: list[str] = []
-    links = []
-    b = _dl_url(td, f"{EXPORT_STEM}_{td}.xlsx")
-    a = _dl_url(td, f"SMM锂电现货价格_{td}.xlsx")
-    if b:
-        links.append(f"📥 [下载今日40种业务产品报价]({b})")
-    if a:
-        links.append(f"📥 [下载当日全量采集数据]({a})")
-    if links:
-        lines = ["", "【数据下载】"] + links
-    return lines
-
-
 def _split_messages(head_lines: list[str], blocks: list[str],
                     tail_lines: list[str]) -> list[str]:
-    """长度保障：超限时按业务类别块拆分为连续多条（首条含概况、末条含下载）。"""
+    """长度保障：超限时按业务类别块拆分为连续多条（首条含概况）。"""
     full = "\n".join(head_lines + blocks + tail_lines)
     if len(full) <= MAX_MESSAGE_CHARS:
         return [full]
@@ -264,14 +215,16 @@ def _split_messages(head_lines: list[str], blocks: list[str],
 def render_dingtalk_message(meta: dict, rows: list[dict]) -> list[str]:
     """生成钉钉日报 markdown 消息（可能多条）。
 
-    rows 为空（构建失败兜底）→ 仅采集概况 + 下载链接，不展示产品明细。
+    rows 为空（构建失败兜底）→ 仅采集概况，不展示产品明细。
+    HIDDEN_PRODUCT_IDS 中的产品不进日报消息（仅隐藏钉钉展示，
+    build_report/Excel/门户口径均不受影响）。
     """
     emoji = {"success": "✅", "partial_success": "⚠️", "failed": "❌"}.get(
         meta.get("status"), "❓")
     td = str(meta.get("target_date") or "")
     dd = str(meta.get("data_date") or td)
     head = [
-        f"## {emoji} SMM 锂电价格采集日报",
+        f"## {emoji} 锂电价格采集日报",
         f"**日期**：{td}" + (f"（页面数据日期 {dd}）" if dd != td else ""),
         "",
         "【采集概况】",
@@ -281,11 +234,11 @@ def render_dingtalk_message(meta: dict, rows: list[dict]) -> list[str]:
     ]
     if meta.get("failed_categories"):
         head.append(f"**失败类目**：{'、'.join(str(c) for c in meta['failed_categories'][:5])}")
-    tail = _download_lines(td)
     if not rows:
-        return ["\n".join(head + tail)]
+        return ["\n".join(head)]
+    rows = [r for r in rows if r["id"] not in HIDDEN_PRODUCT_IDS]
     n_new = sum(1 for r in rows if r["status"] == STATUS_NEW)
-    head += ["", "【40 种重点业务产品报价】", "",
+    head += ["", "【重点业务产品报价】", "",
              f"目标产品：{len(rows)} 种 ｜ 本次有效新报价：{n_new} 种 ｜ "
              f"本次无新报价：{len(rows) - n_new} 种"]
     blocks = []
@@ -293,7 +246,7 @@ def render_dingtalk_message(meta: dict, rows: list[dict]) -> list[str]:
         cn = CN_NUM[i] if i < len(CN_NUM) else str(i + 1)
         block = ["", f"{cn}、{cat}（{len(items)}）"] + [_product_line(r) for r in items]
         blocks.append("\n".join(block))
-    return _split_messages(head, blocks, tail)
+    return _split_messages(head, blocks, [])
 
 
 # ── Excel 导出（40 种业务产品报价） ─────────────────────────────

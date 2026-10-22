@@ -83,7 +83,7 @@ async def send_daily_notification(meta, report_rows=None):
         except Exception:
             pass
         return False
-    title = f"SMM锂电日报 {td}"
+    title = f"锂电日报 {td}"
     ok_all = True
     for i, text in enumerate(texts):
         t = title if len(texts) == 1 else f"{title}（{i+1}/{len(texts)}）"

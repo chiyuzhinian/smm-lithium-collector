@@ -157,3 +157,17 @@ def test_ops_events_has_event_matching():
     assert ops_events.has_event("EVT_X", "run_id=zzz") is True
     assert ops_events.has_event("EVT_X", "run_id=other") is False
     assert ops_events.has_event("EVT_Y", "run_id=zzz") is False
+
+
+@pytest.mark.asyncio
+async def test_daily_title_without_smm_prefix(monkeypatch):
+    titles = []
+
+    async def _rec(title, text):
+        titles.append(title)
+        return True
+
+    monkeypatch.setattr(notifier, "send_dingtalk", _rec)
+    ok = await notifier.send_daily_notification(META)
+    assert ok is True
+    assert titles == ["锂电日报 2026-10-20"]
