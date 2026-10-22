@@ -198,6 +198,23 @@ class TestLoginFlow:
         assert json.loads(me["body"])["username"] == "admin"
         assert request(env.port, "GET", "/", headers=cookie_header(cookie))["status"] == 200
 
+    def test_cookie_secure_follows_x_forwarded_proto(self, env):
+        seed(env.store, "admin", role="admin")
+        payload = {"username": "admin", "password": "pw-123456"}
+        # 经 HTTPS 终止层（nginx X-Forwarded-Proto: https）→ cookie 带 Secure
+        r_https = request(env.port, "POST", "/api/auth/login", json.dumps(payload),
+                          {"Content-Type": "application/json",
+                           "X-Forwarded-Proto": "https"})
+        assert r_https["status"] == 200
+        assert "; Secure" in r_https["headers"].get("set-cookie", "")
+        # HTTP 直连（IP 入口，无该头）→ cookie 不带 Secure，登录不受影响
+        r_http = request(env.port, "POST", "/api/auth/login", json.dumps(payload),
+                         {"Content-Type": "application/json"})
+        assert r_http["status"] == 200
+        sc = r_http["headers"].get("set-cookie", "")
+        assert "smm_session=" in sc
+        assert "; Secure" not in sc
+
     def test_next_validated_against_open_redirect(self, env):
         seed(env.store, "admin", role="admin")
         r, _ = login(env.port, "admin", "pw-123456", next_path="//evil.com")

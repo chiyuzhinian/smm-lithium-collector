@@ -253,7 +253,7 @@ topics:
 auth:
   session_ttl_hours: 10          # 普通用户会话有效期
   admin_session_ttl_hours: 4     # 管理员会话有效期
-  cookie_secure: false           # 部署 HTTPS 终止层（Nginx 等）后改为 true
+  cookie_secure: false           # 默认按请求协议动态加 Secure（nginx X-Forwarded-Proto: https 时）；置 true 强制全部 Secure，将导致 IP+HTTP 入口登录失效
   lockout_max_failures: 5        # 同一账号+IP 连续失败 N 次后锁定
   lockout_window_minutes: 10     # 失败计数滚动窗口（分钟）
   lockout_minutes: 10            # 锁定时长（分钟）

@@ -118,7 +118,6 @@ if [ ! -f .env ]; then
     echo "    SMM_TARGET_URL=https://new-energy.smm.cn/new_energy/14042"
     echo "    DINGTALK_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=xxx"
     echo "    DINGTALK_SECRET=SECxxx"
-    echo "    FILE_HOST=http://你的公网IP:8888"
     echo "    MYSQL_AUTO_SYNC_AFTER_COLLECTION=false"
     echo ""
     warn "请编辑 .env 后重新运行本脚本，或稍后手动配置"

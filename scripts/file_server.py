@@ -1051,7 +1051,12 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
 
     def _session_cookie_str(self, token: str, ttl_hours: float) -> str:
         cfg = _portal_config().get("auth") or {}
-        secure = "; Secure" if cfg.get("cookie_secure") else ""
+        # Secure 动态判定：仅当反向代理声明 HTTPS 终止（X-Forwarded-Proto: https）
+        # 或配置 cookie_secure 强制开启时加 Secure。8888 仅监听 127.0.0.1，
+        # X-Forwarded-Proto 只可能来自本机 nginx——IP+HTTP 直连登录不受影响。
+        secure_flag = bool(cfg.get("cookie_secure")) or (
+            (self.headers.get("X-Forwarded-Proto") or "").lower() == "https")
+        secure = "; Secure" if secure_flag else ""
         return (f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/"
                 f"; Max-Age={int(ttl_hours * 3600)}{secure}")
 
