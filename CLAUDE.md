@@ -1,6 +1,6 @@
 # CLAUDE.md — SMM 锂电现货价格采集系统（含数据门户）
 
-> 本文档基于 **2026-10-12 阿里云 ECS 迁移后生产运行状态**更新（原 2026-09-06 版随旧服务器 106.12.59.96 到期作废）。
+> 本文档基于 **2026-10-22 域名接入（HTTPS）+ 钉钉日报格式优化后生产运行状态**更新（2026-10-12 阿里云 ECS 迁移版为本版基础）。
 > 维护约定：重大变更（新功能/新表/新定时任务/部署变更）后同步更新本文件与 `DEPLOYMENT_STATUS_*.md`。
 
 ## 1. 项目简介
@@ -22,17 +22,17 @@
 | 服务器 | **阿里云 ECS**，公网 IP **101.37.235.13**（Ubuntu 22.04.5，4C8G/80G），项目路径 `/root/smm-lithium-collector` |
 | venv | `.venv`（Python 3.11，官方源；pip 走阿里云内网镜像） |
 | systemd | `smm-fileserver.service` — active/running，端口 8888 **仅监听 127.0.0.1**（`FILE_SERVER_BIND` 默认），非特权用户 smmweb，沙箱加固（ProtectSystem=strict 等），StateDirectory=`/var/lib/smm-fileserver` |
-| nginx (:80) | `ip-access`（default_server，公网 IP 临时入口）→ 127.0.0.1:8888；`price.ldhs.online` 站点已就位**未启用**（待 DNS/备案）；模板在 `scripts/nginx/` |
-| cron（root） | 由 `scripts/install_cron.sh` 管理：`5 9 * * 1-5` run_daily.sh、`30 9 * * 1-5` catchup_daily.sh、`0 10 * * 1-5` smm_health_sentinel.py、`@reboot` catchup_daily.sh |
+| nginx (:80/:443) | `ip-access`（default_server，公网 IP 入口）→ 127.0.0.1:8888；`price.ldhs.online` 站点已启用（:80 301→https + :443，阿里云免费证书 **2027-01-19 到期**，30/15/7 天钉钉提醒）；模板在 `scripts/nginx/`；certbot 不可用（境外出站阻断） |
+| cron（root） | 由 `scripts/install_cron.sh` 管理：`5 9 * * 1-5` run_daily.sh、`30 9 * * 1-5` catchup_daily.sh、`0 10 * * 1-5` smm_health_sentinel.py、`0 11 * * 1-5` retry_metals.py、`15 9 * * *` ssl_cert_expiry_check.py、`@reboot` catchup_daily.sh |
 | SQLite | `data/database/smm_lithium.db`：**18358 条**（2025-11 至 2026-10-12；**09-29~10-11 空窗**，用户确认不补采；另 1 行 price_date 为空） |
 | MySQL | 本地 3306，库 `smm_lithium`：`smm_price_records` **18238 条**（max 2026-10-12）；root@localhost 为 mysql_native_password（与旧机一致） |
 | collection_runs | 2026-10-12 **success**（40 分类 447 行；PACK 页面缺失 → 固定汇总 temp_snapshot 正常机制） |
 | 每日验证 | 2026-10-12 **WARNING**（无 FAIL） |
 | 门户账号 | 7 用户（含 huayou/admin），库 `/var/lib/smm-fileserver/auth.db`（备份迁移，密码哈希原样保留） |
-| 钉钉 | 已配置；`FILE_HOST=http://101.37.235.13`（无端口，经 nginx 80）；日报为**业务报价日报**（采集概况 + 40 种业务产品分类明细 + 2 个下载链接），正文不再展示 MySQL 统计 |
-| Git 分支 | 生产部署于 **feature/dingtalk-business-report-2026-10**（a927487，= 迁移分支 + 门户/认证/趋势 R1-R4 + 钉钉业务日报 4 提交）；原生产分支 feature/aliyun-migration-2026-10（fbca17d 为部署前回滚点，备份在服务器 backups/dingtalk-report-pre-20261020/）；`main` 落后勿操作 |
+| 钉钉 | 已配置；日报为**业务报价日报**：标题「锂电价格采集日报」+卡片「锂电日报 {date}」+采集概况 + **38 种**产品明细（隐藏 2 个无报价储能型，HIDDEN_PRODUCT_IDS）+ **无下载区**；正文无 MySQL 统计；FILE_HOST 已废弃 |
+| Git 分支 | 生产部署于 **feature/price-domain-dingtalk-report-2026-10**（域名+HTTPS 接入 + 钉钉日报格式优化）；部署前回滚点 dad501a（feature/dingtalk-business-report-2026-10），文件备份 backups/domain-dingtalk-fmt-20261022/；`main` 落后勿操作 |
 | 代码更新通道 | 服务器直连 GitHub 超时 → 本地 commit+push → `git bundle` → scp → 服务器 `git pull bundle` |
-| 测试 | **541 passed**（2026-10-20 服务器 venv 全量，0 failed；本地 Windows 因 fcntl/Unix 权限模型不能作为测试基准，全量需 --ignore=tests/test_profile_lock.py） |
+| 测试 | **545 passed**（2026-10-22 服务器 venv 全量，0 failed；本地 Windows 因 fcntl/Unix 权限模型不能作为测试基准，全量需 --ignore=tests/test_profile_lock.py） |
 | 迁移报告 | `docs/deployment/aliyun-migration-2026-10/`（01~09 全部交付文档） |
 
 ### 文档现状（哪些可信）
@@ -94,7 +94,7 @@
 │   ├── business_report.py       # 规范日报生成（映射配置 → 11 列报表）
 │   ├── business_daily.py        # ⭐ 钉钉业务报价日报数据层（40 产品，与门户共用
 │   │                            #   portal_service 口径：新报价判定/缺失标注/消息渲染/
-│   │                            #   Excel 导出/签名下载链接；只读不写库）
+│   │                            #   Excel 导出；HIDDEN_PRODUCT_IDS 隐藏无报价产品；只读不写库）
 │   ├── dl_link.py               # 公开下载链接签名（HMAC 路径绑定+限时；/dl/ 路由共用）
 │   ├── notifier.py              # 钉钉传输层（webhook 加签 + 3 次重试 + run_id 防重 +
 │   │                            #   DINGTALK_DRY_RUN 预览；文案由 business_daily 生成）
@@ -115,7 +115,7 @@
 │   ├── run_daily.py             # 每日采集入口（调 main.cli）
 │   ├── run_daily.sh             # cron 包装：venv 检查 + flock 互斥锁
 │   ├── catchup_daily.sh         # 兜底补采（9:30 + @reboot）：查 collection_runs，今日未 success 才采集
-│   ├── install_cron.sh          # 安装/移除 cron（--dry-run / --remove）
+│   ├── install_cron.sh          # 安装/移除 cron（--dry-run / --remove；含 SSL 到期提醒行）
 │   ├── deploy_server.sh         # Ubuntu 一键部署（venv/playwright/依赖）
 │   ├── setup_systemd.sh / secure_fileserver.sh  # systemd 安装 / smmweb 最小只读权限
 │   ├── file_server.py           # 数据门户 Web 服务（8888，静态页 + ~20 个 API）
@@ -125,7 +125,8 @@
 │   ├── backfill_history.py      # 历史回溯：hq.smm.cn API 拉最近 30 交易日（已实现）
 │   ├── backfill_remaining.py    # 缺失分类一次性补采
 │   ├── backfill.py              # 桩实现（勿用）
-│   ├── retry_metals.py          # 铜铝镍 11:00 延迟补采（⚠️ 当前 crontab 未安装）
+│   ├── retry_metals.py          # 铜铝镍 11:00 延迟补采（cron 已装 2026-10-19）
+│   ├── ssl_cert_expiry_check.py # SSL 证书到期检查：≤30/15/7 天钉钉提醒（cron 15 9 * * *，按到期日+阈值去重）
 │   ├── rebuild_summaries.py     # 从 SQLite 全量重建历史/固定汇总（--dry-run/--fix-gaps）
 │   ├── build_market_report.py   # 市场价格报表（匹配模板格式 + 涨跌基准）
 │   ├── generate_report.py       # 领导汇报报告（产业链全景 Excel）
@@ -175,7 +176,7 @@
 10. 每日 9 层验证        daily_validation.py（只读）：文件/结构/日期/重复/分类/数值/波动/
                         历史连续/固定汇总一致性 → PASS/WARNING/FAIL 写 logs/validation/
 11. MySQL 同步          按校准后 data_date 同步（不是 target_date，避免空窗）；3 次重试
-12. 钉钉通知            日报摘要 + Excel 下载链接；运维事件写 auth.db
+12. 钉钉通知            业务报价日报（采集概况 + 38 种产品明细，无下载区）；运维事件写 auth.db
 13. 退出码              0 success / 2 partial_success / 1 failed
 ```
 
@@ -248,7 +249,7 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 .venv/bin/python scripts/sync_to_mysql.py --full
 
 # 测试
-.venv/bin/python -m pytest -q        # 226 passed
+.venv/bin/python -m pytest -q        # 545 passed（2026-10-22）
 ```
 
 ### 数据门户（8888）
@@ -270,9 +271,7 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
   `/api/auth/*`(login/logout/me/csrf/register/change-password)
   `/api/admin/*`(overview/users/logs/tasks/events/errors/data-quality/audit)
   `/health`
-- **公开签名下载**：`GET /dl/{sig}/{exp}/{path}`（钉钉日报 Excel 免登录限时链接；
-  密钥 /var/lib/smm-fileserver/dl_sign.key 0640 root:smmweb，FILE_DL_KEY 可覆盖；
-  验签失败一律 404；密钥缺失时钉钉链接自动回退登录式）
+- **公开签名下载**：`GET /dl/{sig}/{exp}/{path}`（2026-10-22 起日报不再生成新链接，路由保留服务存量链接；密钥 /var/lib/smm-fileserver/dl_sign.key 0640 root:smmweb；验签失败一律 404）
 - 服务端强制 role=user 注册；管理员用户管理：停用/启用/重置密码/软删除
 
 ## 8. 开发规范
@@ -324,16 +323,17 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 | ✅ 固定汇总门控 | 规范全集+对齐率 0.6+invalid 0.05；不达标写临时快照 |
 | ✅ 每日 manifest | 无条件生成，含缺失分类/对齐率/门控决策 |
 | ✅ MySQL 同步 | 3 表 + record_hash 去重 + 3 次重试 + 按校准日期同步 |
-| ✅ 钉钉日报 | 摘要 + Excel 下载链接 |
+| ✅ 钉钉日报 | 业务报价日报（2026-10-22 起：采集概况 + 38 种产品明细，标题去 SMM、无下载区） |
 | ✅ 门户重构(已部署) | 业务品种映射(49行)+每日报价+价格走势+数据与报表+月度业务报表 Excel |
 | ✅ 门户账号体系 | 表单登录+Session+CSRF+防爆破+注册(强制 user)+管理员用户管理 |
 | ✅ 运维中心 | 系统资源/采集任务/验证结果/事件/错误日志查看 |
 | ✅ 业务报告 | 规范日报（11 列，映射配置）+ 领导汇报 + 市场价格报表 |
-| ✅ 钉钉业务日报 | 采集概况 + 40 种业务产品分类明细 + 双下载链接（2026-10-20 部署）；与门户共用映射/口径；发送重试+防重+DRY_RUN |
+| ✅ 钉钉业务日报 | 采集概况 + 38 种产品明细（隐藏 2 个无报价储能型）+ 新标题 + 无下载区（2026-10-22 部署）；与门户共用映射/口径；发送重试+防重+DRY_RUN |
+| ✅ 域名+HTTPS | price.ldhs.online 已启用（http→https 301，阿里云免费证书 2027-01-19 到期，30/15/7 天钉钉提醒；cookie 动态 Secure；IP 入口保留）（2026-10-22 部署） |
 | ✅ 兜底补采 | 9:30 重试 + @reboot 开机补采 + flock 互斥锁 |
 | ✅ 汇总重建 | rebuild_summaries.py 从 SQLite 全量重建 + 缺口回补 |
 | ✅ 一键部署 | deploy_server.sh + setup_systemd.sh + secure_fileserver.sh |
-| ✅ 测试 | 226 个全部通过 |
+| ✅ 测试 | 545 passed（2026-10-22 服务器全量，0 failed） |
 
 ### 数据现状（2026-09-06）
 
@@ -350,13 +350,13 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 | ⚠️ `prefer_api: true` | 未实现（采集仍是 DOM 解析；API 仅用于 backfill_history） |
 | ⚠️ 自动登录 | 未实现（需先确认表单选择器；当前手动登录） |
 | ⚠️ 分页翻页 | selectors.yaml 分页配置为空 |
-| ⚠️ retry_metals.py | 脚本存在但当前 crontab 未安装；铜/镍晚发布由页面日期校准兜底 |
+| ✅ retry_metals.py | 已装 cron（工作日 11:00，2026-10-19）；历史散缺不可回补（hq API 10005/captcha 风控），缺口如实保留 |
 | ⚠️ PACK 分类 | 页面时有时无（2026-09-04 缺失 → 固定汇总 temp_snapshot，正常机制） |
 | ⚠️ 文档 | README.md / RUN_GUIDE.md 过时（Windows/ngrok 时代） |
 | ⚠️ pandas FutureWarning | 空 DataFrame concat 行为将变化（exporter.py:185） |
 | ⚠️ 1 行 price_date 为空 | 历史脏数据（12661 行中 1 行） |
 | ~~门户重构未部署~~ | ✅ 已解决：2026-09-06 19:58 部署生产（`systemctl restart smm-fileserver`），8888 = 新版；8899 预览保留供开发用 |
-| ⚠️ LFP 储能型≥2.50/2.40 | SMM 官方已并入密度价格点，无独立报价；门户显示口径说明、月报留空（业务确认前维持现状） |
+| ⚠️ LFP 储能型≥2.50/2.40 | SMM 官方已并入密度价格点，无独立报价；门户显示口径说明、月报留空；钉钉日报已隐藏（business_daily.HIDDEN_PRODUCT_IDS，恢复由用户自行修改） |
 | ❌ 邮件通知 | 未实现（钉钉已替代） |
 
 ## 12. 维护注意（踩坑清单）
@@ -377,3 +377,8 @@ journalctl -u smm-fileserver -n 100  # 看门户日志
 9. **门户重启**：改 file_server.py / static / config 后 `systemctl restart smm-fileserver`
 10. **登录态**：锂电页 + 基础金属页合并于 storage_state.json（manual_login_metals.py）；失效时
     采集会保存 login_expired 截图并报错
+11. **证书更换**：阿里云免费证书 90 天手动更换，步骤与回滚见
+    docs/change-records/2026-10-22/price-domain-dingtalk-report/07-ssl-cert-ops-manual.md；
+    到期提醒 30/15/7 天经钉钉（scripts/ssl_cert_expiry_check.py，cron 15 9 * * *，按到期日+阈值去重）
+12. **certbot 不可用**：服务器境外出站被阻断（acme-v02.api.letsencrypt.org TCP 不通），
+    HTTPS 证书走阿里云免费证书，勿再尝试 certbot

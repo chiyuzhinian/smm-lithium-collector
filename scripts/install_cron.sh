@@ -32,6 +32,11 @@ CRON_REBOOT="@reboot sleep 60 && /bin/bash ${ROOT}/scripts/catchup_daily.sh >> $
 # 只读健康哨兵（V2 切换 2026-09-18 新增）：工作日 10:00 检查今日是否成功采集
 # 不开浏览器、不写价格库；异常时通过 ops_events + 钉钉告警
 CRON_SENTINEL="0 10 * * 1-5 /bin/bash -c 'cd ${ROOT} && .venv/bin/python scripts/smm_health_sentinel.py >> ${ROOT}/logs/sentinel.log 2>&1'"
+# 基础金属 11:00 延迟补采（SMM 铜铝镍晚发布；2026-10-19 安装）
+CRON_METALS="0 11 * * 1-5 ${ROOT}/.venv/bin/python ${ROOT}/scripts/retry_metals.py >> ${ROOT}/logs/cron_metals.log 2>&1"
+# SSL 证书到期提醒（2026-10-22 新增）：每天 9:15 检查，剩余 ≤30/15/7 天时钉钉提醒，
+# 按 (到期日, 阈值) 去重；证书更换后自动重新武装。免费证书无自动续签，需手动更换。
+CRON_SSL="15 9 * * * ${ROOT}/.venv/bin/python ${ROOT}/scripts/ssl_cert_expiry_check.py >> ${ROOT}/logs/ssl_expiry.log 2>&1"
 MARKER="# SMM 锂电采集定时任务（由 install_cron.sh 管理）"
 
 # ── 生成新的 crontab ──────────────────────────────────────────
@@ -42,6 +47,8 @@ gen_crontab() {
     echo "$CRON_DAILY"
     echo "$CRON_RETRY"
     echo "$CRON_SENTINEL"
+    echo "$CRON_METALS"
+    echo "$CRON_SSL"
     echo "$CRON_REBOOT"
 }
 
@@ -49,7 +56,7 @@ gen_crontab() {
 remove_smm_tasks() {
     local tmp
     tmp=$(mktemp)
-    crontab -l 2>/dev/null | grep -v "$MARKER" | grep -v "run_daily.sh" | grep -v "catchup_daily.sh" | grep -v "smm_health_sentinel.py" | grep -v "retry_metals.py" > "$tmp" || true
+    crontab -l 2>/dev/null | grep -v "$MARKER" | grep -v "run_daily.sh" | grep -v "catchup_daily.sh" | grep -v "smm_health_sentinel.py" | grep -v "retry_metals.py" | grep -v "ssl_cert_expiry_check.py" > "$tmp" || true
     if [ -s "$tmp" ]; then
         # 删除末尾多余空行
         sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp" 2>/dev/null || true
