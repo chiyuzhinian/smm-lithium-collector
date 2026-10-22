@@ -19,13 +19,14 @@
 
 ## 部署 B（域名 + HTTPS，nginx 层）
 
-1. 备份站点文件与 `nginx -T` 快照（`backups/nginx-price-20261022/`）。
-2. `ln -sf` 启用域名站点 → `nginx -t` → `systemctl reload nginx` → `curl -I http://price.ldhs.online/health` 200。
-3. `apt install -y certbot python3-certbot-nginx`。
-4. `certbot --nginx -d price.ldhs.online --redirect`（签发 + 写 443 块 + http→https 301）。
-5. 443 块与 ip-access 补 `X-Forwarded-Proto $scheme;` → `nginx -t` → reload。
-6. 验证：https 200 / 证书链 / 301 / certbot.timer / `certbot renew --dry-run`。
-7. 回写仓库模板（实际配置 → `scripts/nginx/price.ldhs.online.conf`），如有差异随部署文档提交。
+已执行（2026-10-22）：① 备份站点文件与 `nginx -T` 快照（`backups/nginx-price-20261022/`）；② `ln -sf` 启用域名站点 → `nginx -t` → reload → `curl http://price.ldhs.online/health` 200；③ certbot 实测不可达（境外出站阻断）→ 用户决策改用阿里云免费证书；certbot.timer 已停用，证书目录 `/etc/nginx/ssl/price.ldhs.online/` 已建。
+
+待执行（证书文件到位后）：
+
+1. 证书就位：`backups/certs-20261022/` → `/etc/nginx/ssl/price.ldhs.online/{fullchain.pem,privkey.pem}`（privkey 600）。
+2. 应用站点配置（模板终态：:80 301 + :443 ssl + X-Forwarded-Proto）；ip-access 补 `X-Forwarded-Proto $scheme;` → `nginx -t` → reload。
+3. 验证：https 200 / 证书链 / http→https 301 / IP 入口完好。
+4. 每年手动续期流程写入 `DEPLOYMENT_STATUS_2026-10-22.md`。
 
 ## 验收清单
 

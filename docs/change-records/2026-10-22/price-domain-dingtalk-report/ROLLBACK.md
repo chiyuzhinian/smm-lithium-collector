@@ -19,13 +19,13 @@ systemctl restart smm-fileserver   # file_server.py 回退后重启
 ```bash
 rm /etc/nginx/sites-enabled/price.ldhs.online        # 撤销启用
 cp backups/nginx-price-20261022/price.ldhs.online.pre-certbot \
-   /etc/nginx/sites-available/price.ldhs.online      # 恢复 pre-certbot 内容
+   /etc/nginx/sites-available/price.ldhs.online      # 恢复启用前内容
 nginx -t && systemctl reload nginx
-# 可选：systemctl stop certbot.timer；apt remove certbot python3-certbot-nginx
 ```
 
 - IP 入口（ip-access default_server）全程未动，任何时刻可回退到「仅 IP 访问」状态。
-- 证书不主动吊销（Let's Encrypt 90 天自动过期）；如需立即失效可 `certbot revoke`。
+- 证书不主动吊销（阿里云证书到期自动失效；如需立即失效可在控制台吊销）；私钥文件删除即可停止使用。
+- certbot.timer 已停用（本次部署时 `systemctl disable --now`）；certbot 包保留未用，可 `apt remove certbot python3-certbot-nginx` 清理。
 - 安全组 443 可保留（无监听即无效）或由用户关闭。
 
 ## 3 数据保障
