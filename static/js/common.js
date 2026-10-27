@@ -72,3 +72,23 @@ function emptyHtml(icon, text) {
 function loadingHtml(text) {
   return `<div class="loading"><span class="spinner"></span>${escHtml(text || "加载中…")}</div>`;
 }
+
+/* ── 用户产品选择偏好（三页独立、每用户独立；服务端持久化，跨刷新/重登/设备恢复） ── */
+
+const Prefs = {
+  /* 读取某页已保存的选择：返回 null（从未保存，走页面默认行为）或 id 数组（可为空=显式清空）。
+     失败时提示并降级为 null，绝不阻塞页面加载。 */
+  async load(page) {
+    try {
+      const data = await API.get("/api/user/preferences", 0); // ttl=0 禁用缓存，保证读到最新
+      return data.preferences ? data.preferences[page] : null;
+    } catch (err) {
+      notify("产品选择加载失败，已使用默认选择", "error");
+      return null;
+    }
+  },
+  /* 保存某页选择（登录 + CSRF）；失败时 reject，由调用方 toast（不阻塞页面查询）。 */
+  save(page, ids) {
+    return API.post("/api/user/preferences", { page, ids });
+  },
+};

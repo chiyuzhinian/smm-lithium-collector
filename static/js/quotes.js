@@ -67,6 +67,14 @@ async function init() {
   } catch (err) {
     notify("全量产品目录加载失败：" + err.message, "error");
   }
+  // 恢复已保存的产品选择（先目录后偏好；无记录=默认 40 品种视图；失效 id 静默丢弃不触发回写）
+  try {
+    const saved = await Prefs.load("daily_quotes");
+    if (Array.isArray(saved)) {
+      qstate.picked = saved.filter((id) => qstate.catalogById[id]);
+      renderPickedChips();
+    }
+  } catch (err) { /* Prefs.load 内部已提示 */ }
   await refresh();
 }
 
@@ -111,6 +119,7 @@ function bindFilters() {
     document.getElementById("prod-suggest").hidden = true;
     renderPickedChips();
     refresh();
+    savePrefs();  // reset = 显式清空，持久化空数组
   });
   document.getElementById("btn-trends").addEventListener("click", (e) => {
     const ids = qstate.picked.length
@@ -247,6 +256,13 @@ function togglePicked(id) {
   renderPickedChips();
   renderProdSuggestList();
   refresh();
+  savePrefs();
+}
+
+/* 保存产品选择（fire-and-forget；失败 toast 提示不阻塞查询；下次操作全量重存自愈） */
+function savePrefs() {
+  Prefs.save("daily_quotes", qstate.picked.slice()).catch((err) =>
+    notify("产品选择保存失败：" + (err.data && err.data.error ? err.data.error : err.message), "error"));
 }
 
 function renderPickedChips() {
@@ -288,8 +304,12 @@ async function refresh() {
       const data = await API.get("/api/portal/quotes?" + params.toString(), 15000);
       qstate.rows = data.rows || [];
     }
+    // 无有效报价的产品不渲染整行：后端业务口径 = average_price 可解析非空
+    // （业务模式无报价为 quote:null；catalog 模式空日均价行 quote.average_price 为 null，
+    //   两种模式统一按日均价有效性过滤）；先过滤再更新状态，状态行/计数/渲染共用同一份可见行
+    qstate.visible = qstate.rows.filter(
+      (r) => r.quote && r.quote.average_price !== null && r.quote.average_price !== "");
     updateStatus();
-    qstate.visible = qstate.rows;
     renderTable();
   } catch (err) {
     scroll.innerHTML = emptyHtml("⚠️", "报价加载失败：" + err.message);
@@ -297,22 +317,23 @@ async function refresh() {
 }
 
 function updateStatus() {
-  const meta = qstate.rows && qstate.rows[0] ? (qstate.rows[0].quote || {}) : {};
-  const latestDate = qstate.rows.reduce((m, r) => {
+  const latestDate = qstate.visible.reduce((m, r) => {
     const d = (r.quote && r.quote.price_date) || "";
     return d > m ? d : m;
   }, "");
-  const latestCollected = qstate.rows.reduce((m, r) => {
+  const latestCollected = qstate.visible.reduce((m, r) => {
     const t = (r.quote && r.quote.collected_at) || "";
     return t > m ? t : m;
   }, "");
   document.getElementById("st-latest").textContent = latestDate || "—";
   document.getElementById("st-collected").textContent = latestCollected ? fmtTs(latestCollected) : "—";
   document.getElementById("st-count").textContent = qstate.visible.length;
+  const hidden = qstate.picked.length - qstate.visible.length;
   document.getElementById("result-count").innerHTML =
     (qstate.picked.length
-      ? `已选 <b>${qstate.picked.length}</b> 个全量产品`
-      : `共 <b>${qstate.visible.length}</b> 个业务品种`) +
+      ? `已选 <b>${qstate.picked.length}</b> 个全量产品 · 有效报价 <b>${qstate.visible.length}</b> 行` +
+        (hidden > 0 ? ` · <b>${hidden}</b> 个无有效报价（已隐藏）` : "")
+      : `共 <b>${qstate.visible.length}</b> 个业务品种有有效报价`) +
     (qstate.asOf ? ` · 截至 <b class="num">${escHtml(qstate.asOf)}</b> 的最新报价` : " · 最新可用报价");
 }
 
@@ -322,8 +343,8 @@ function renderTable() {
   const scroll = document.getElementById("table-scroll");
   if (qstate.visible.length === 0) {
     const msg = qstate.picked.length
-      ? "所选产品暂无报价数据，请调整选择"
-      : "没有符合条件的品种，请调整筛选条件";
+      ? "所选产品在当前日期均无有效报价，请调整选择或查询日期"
+      : "当前查询日期没有有效报价的品种，请调整筛选条件";
     scroll.innerHTML = emptyHtml("📭", msg);
     return;
   }

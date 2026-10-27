@@ -50,6 +50,9 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   bindControls();
+  // 指标默认态由 JS 唯一控制（默认日均价，不依赖 HTML class）
+  document.querySelectorAll("#metric-seg button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.metric === tstate.metric));
   try {
     const data = await API.get("/api/portal/products", 60000);
     tstate.products = data.products.filter((p) => p.source === "SMM");
@@ -71,13 +74,24 @@ async function init() {
 
   // URL 参数：/trends?ids=a,b&from=&to=；无参数 = 空选择（引导用户点选）
   const params = new URLSearchParams(location.search);
-  const ids = (params.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean);
-  for (const id of ids) {
-    if (tstate.products.some((p) => p.id === id)) addProduct(id, true);
+  const urlIds = (params.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (urlIds.length) {
+    // URL 显式导航（如每日报价「查看走势」）优先，且不触发偏好保存
+    for (const id of urlIds) {
+      if (tstate.products.some((p) => p.id === id)) addProduct(id, true);
+    }
+  } else {
+    // 恢复已保存的产品选择（先目录后偏好；无记录=空选择引导；失效 id 静默丢弃）
+    const saved = await Prefs.load("price_trends");
+    if (Array.isArray(saved)) {
+      saved.filter((id) => tstate.products.some((p) => p.id === id))
+           .forEach((id) => addProduct(id, true));
+    }
   }
   if (params.get("from")) { tstate.range = "custom"; tstate.from = params.get("from"); tstate.to = params.get("to"); }
   syncRangeUI();
   await loadData();
+  renderChips();   // 恢复后渲染产品图例标签（与选中状态/图表一致；series 已就绪再渲染避免误标「暂无报价」）
   renderCharts();
 }
 
@@ -184,6 +198,7 @@ function renderSuggest(q) {
         else addProduct(id);
         box.classList.remove("open");
         document.getElementById("product-pick").value = "";
+        saveSelected();
         await loadData();
         renderCharts();
       });
@@ -272,7 +287,12 @@ function renderSummary() {
     const unit = s.unit || "";
     const last = pts[pts.length - 1];
     const first = pts[0];
-    const lastText = `<b>${priceText(last.average_price)}</b> ${escHtml(unit)}（${escHtml(last.price_date)}）`;
+    // 日均价（已确认口径）：窗口内有效报价点 average_price 求和 ÷ 有效报价点数量；
+    // 缺报日期不参与分母、不补造数据点（曲线算法不变，此处仅摘要展示）
+    const sum = pts.reduce((acc, p) => acc + num(p.average_price), 0);
+    const avg = pts.length ? sum / pts.length : null;
+    const avgText = avg === null ? "—" :
+      priceText(avg.toFixed(Math.abs(avg) >= 100 ? 0 : Math.abs(avg) >= 1 ? 2 : 4));
     let chgText = "—";
     let chgCls = "sum-flat";
     if (pts.length >= 2 && first !== last) {
@@ -286,7 +306,7 @@ function renderSummary() {
       }
     }
     el.innerHTML =
-      `<span>期末日均价 ${lastText}</span>` +
+      `<span>日均价：<b>${avgText}</b> ${escHtml(unit)}</span>` +
       `<span class="status-sep">·</span>` +
       `<span>区间变化 <b class="${chgCls}">${chgText}</b></span>` +
       `<span class="status-sep">·</span>` +
@@ -317,12 +337,19 @@ function renderChips() {
   row.querySelectorAll(".legend-remove").forEach((btn) => {
     btn.addEventListener("click", async () => {
       removeProduct(btn.dataset.id);
+      saveSelected();
       await loadData();
       renderCharts();
     });
   });
   updateChartHead();
   renderSummary();
+}
+
+/* 保存产品选择（fire-and-forget；失败 toast 提示不阻塞图表；恢复流程走 silent 路径不写库） */
+function saveSelected() {
+  Prefs.save("price_trends", tstate.selected.slice()).catch((err) =>
+    notify("产品选择保存失败：" + (err.data && err.data.error ? err.data.error : err.message), "error"));
 }
 
 /* ── 数据加载 ── */

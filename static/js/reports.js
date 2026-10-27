@@ -48,6 +48,14 @@ async function init() {
       document.getElementById("month-products-edit").hidden = false;
     }
   } catch (err) { /* 未登录/失败时保持隐藏 */ }
+  // 恢复已保存的产品选择（先目录后偏好；无记录=默认全量对比；失效 id 静默丢弃不触发回写）
+  try {
+    const saved = await Prefs.load("data_reports");
+    if (Array.isArray(saved)) {
+      rstate.ds.picked = saved.filter((id) => rstate.ds.products.some((p) => p.id === id));
+      renderProdChips();
+    }
+  } catch (err) { /* Prefs.load 内部已提示 */ }
   await searchDataset();   // 无选择 = 全部 40 个业务品种，页面加载即有对比表
 }
 
@@ -103,6 +111,7 @@ function bindDataset() {
     rstate.ds.picked = [];
     renderProdChips();
     setupDateDefaults();
+    saveDsPicked();  // reset = 显式清空，持久化空数组
     await searchDataset();
   });
   /* 下载 ① 按当前筛选：与 searchDataset 同源的产品/日期口径（ids 空=全部业务品种） */
@@ -148,6 +157,7 @@ function renderProdSuggest(open) {
       btn.addEventListener("click", async () => {
         togglePicked(btn.dataset.id);
         box.classList.remove("open");
+        saveDsPicked();
         await searchDataset();
       });
     });
@@ -176,9 +186,16 @@ function renderProdChips() {
   row.querySelectorAll(".legend-remove").forEach((btn) => {
     btn.addEventListener("click", async () => {
       togglePicked(btn.dataset.id);
+      saveDsPicked();
       await searchDataset();
     });
   });
+}
+
+/* 保存产品选择（fire-and-forget；失败 toast 提示不阻塞查询；恢复流程不触发保存） */
+function saveDsPicked() {
+  Prefs.save("data_reports", rstate.ds.picked.slice()).catch((err) =>
+    notify("产品选择保存失败：" + (err.data && err.data.error ? err.data.error : err.message), "error"));
 }
 
 async function searchDataset() {
