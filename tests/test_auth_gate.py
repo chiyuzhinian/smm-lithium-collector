@@ -717,6 +717,125 @@ class TestMonthlyDefaultsApi:
                     headers=cookie_header(cookie))
         assert json.loads(g["body"])["ids"] == []
 
+
+# ── 用户产品选择偏好（三页独立、每用户独立） ──────────
+
+class TestUserPreferencesApi:
+    @staticmethod
+    def _seed_config(env):
+        """把真实 config 目录复制进 tmp PROJECT_ROOT（业务 id 白名单校验依赖 business_products.yaml）。"""
+        dst = env.root / "config"
+        if not dst.exists():
+            shutil.copytree(Path(__file__).resolve().parents[1] / "config", dst)
+
+    @staticmethod
+    def _csrf(env, cookie):
+        return json.loads(request(env.port, "GET", "/api/auth/csrf",
+                                  headers=cookie_header(cookie))["body"])["csrf_token"]
+
+    def _post(self, env, cookie, body, csrf=True):
+        headers = {**cookie_header(cookie), "Content-Type": "application/json"}
+        if csrf:
+            headers["X-CSRF"] = self._csrf(env, cookie)
+        return request(env.port, "POST", "/api/user/preferences",
+                       json.dumps(body), headers)
+
+    def test_get_requires_login(self, env):
+        r = request(env.port, "GET", "/api/user/preferences")
+        assert r["status"] == 401
+
+    def test_post_requires_login(self, env):
+        r = request(env.port, "POST", "/api/user/preferences",
+                    json.dumps({"page": "price_trends", "ids": []}),
+                    {"Content-Type": "application/json"})
+        assert r["status"] == 401
+
+    def test_post_without_csrf_403(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = self._post(env, cookie, {"page": "price_trends", "ids": []}, csrf=False)
+        assert r["status"] == 403
+
+    def test_post_invalid_page_400(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = self._post(env, cookie, {"page": "nope", "ids": []})
+        assert r["status"] == 400
+
+    def test_post_ids_not_array_400(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = self._post(env, cookie, {"page": "price_trends", "ids": "al_a00"})
+        assert r["status"] == 400
+
+    def test_never_saved_get_all_none(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = request(env.port, "GET", "/api/user/preferences", headers=cookie_header(cookie))
+        assert r["status"] == 200
+        prefs = json.loads(r["body"])["preferences"]
+        assert prefs == {"daily_quotes": None, "price_trends": None, "data_reports": None}
+
+    def test_post_and_get_roundtrip(self, env):
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = self._post(env, cookie,
+                       {"page": "daily_quotes", "ids": ["cp_aaa111222333", "cp_bbb111222333"]})
+        assert r["status"] == 200
+        body = json.loads(r["body"])
+        assert body["ok"] is True and body["page"] == "daily_quotes"
+        assert body["ids"] == ["cp_aaa111222333", "cp_bbb111222333"]
+        g = request(env.port, "GET", "/api/user/preferences", headers=cookie_header(cookie))
+        assert json.loads(g["body"])["preferences"]["daily_quotes"] == \
+            ["cp_aaa111222333", "cp_bbb111222333"]
+
+    def test_post_filters_invalid_ids(self, env):
+        self._seed_config(env)
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = self._post(env, cookie,
+                       {"page": "price_trends", "ids": ["al_a00", "garbage", "al_a00", 42]})
+        assert r["status"] == 200
+        # 垃圾串/非字符串被丢弃，合法业务 id 保序去重
+        assert json.loads(r["body"])["ids"] == ["al_a00"]
+
+    def test_daily_quotes_rejects_business_id_format(self, env):
+        # daily_quotes 只接受 catalog id（cp_+12hex）；业务 id 被静默丢弃
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = self._post(env, cookie,
+                       {"page": "daily_quotes", "ids": ["al_a00", "cp_aaa111222333", "cp_!!"]})
+        assert r["status"] == 200
+        assert json.loads(r["body"])["ids"] == ["cp_aaa111222333"]
+
+    def test_cross_user_isolation(self, env):
+        self._seed_config(env)
+        seed(env.store, "alice")
+        seed(env.store, "bob")
+        _, cookie_a = login(env.port, "alice", "pw-123456")
+        _, cookie_b = login(env.port, "bob", "pw-123456")
+        r = self._post(env, cookie_a, {"page": "data_reports", "ids": ["al_a00"]})
+        assert r["status"] == 200
+        # bob 读不到 alice 的偏好；alice 其余页不受影响
+        g_b = request(env.port, "GET", "/api/user/preferences", headers=cookie_header(cookie_b))
+        assert json.loads(g_b["body"])["preferences"]["data_reports"] is None
+        g_a = request(env.port, "GET", "/api/user/preferences", headers=cookie_header(cookie_a))
+        prefs_a = json.loads(g_a["body"])["preferences"]
+        assert prefs_a["data_reports"] == ["al_a00"]
+        assert prefs_a["daily_quotes"] is None
+
+    def test_post_empty_ids_persists_empty(self, env):
+        self._seed_config(env)
+        seed(env.store, "huayou")
+        _, cookie = login(env.port, "huayou", "pw-123456")
+        r = self._post(env, cookie, {"page": "price_trends", "ids": ["al_a00"]})
+        assert r["status"] == 200
+        r = self._post(env, cookie, {"page": "price_trends", "ids": []})
+        assert r["status"] == 200
+        g = request(env.port, "GET", "/api/user/preferences", headers=cookie_header(cookie))
+        assert json.loads(g["body"])["preferences"]["price_trends"] == []
+
+
 # ── 邀请码（需求2） ──────────────────────────────────
 
 INVITE_PORTAL_YAML = """portal:

@@ -392,6 +392,69 @@ class TestMonthlyDefaultsStore:
         assert store.get_monthly_defaults() == []
 
 
+# ── 用户产品选择偏好（三页独立、每用户独立） ───────────
+
+class TestUserPreferences:
+    def _uid(self, store, username="user1"):
+        store.create_user(username, "pw-123456", "user")
+        return store.get_user(username)["id"]
+
+    def test_schema_creates_table_idempotent(self, store):
+        store.ensure_schema()
+        with sqlite3.connect(store.db_path) as con:
+            row = con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='user_preferences'"
+            ).fetchone()
+        assert row is not None
+
+    def test_never_saved_returns_all_none(self, store):
+        uid = self._uid(store)
+        prefs = store.get_user_preferences(uid)
+        assert prefs == {"daily_quotes": None, "price_trends": None, "data_reports": None}
+
+    def test_set_get_roundtrip_order(self, store):
+        uid = self._uid(store)
+        store.set_user_preference(uid, "daily_quotes", ["cp_aaa111222333", "cp_bbb111222333"])
+        prefs = store.get_user_preferences(uid)
+        assert prefs["daily_quotes"] == ["cp_aaa111222333", "cp_bbb111222333"]
+        assert prefs["price_trends"] is None  # 其余页不受影响
+
+    def test_empty_list_distinct_from_none(self, store):
+        uid = self._uid(store)
+        store.set_user_preference(uid, "price_trends", [])
+        assert store.get_user_preferences(uid)["price_trends"] == []
+
+    def test_upsert_overwrites(self, store):
+        uid = self._uid(store)
+        store.set_user_preference(uid, "data_reports", ["al_a00", "cu_1e"])
+        store.set_user_preference(uid, "data_reports", ["lce_battery"])
+        assert store.get_user_preferences(uid)["data_reports"] == ["lce_battery"]
+
+    def test_per_page_isolation(self, store):
+        uid = self._uid(store)
+        store.set_user_preference(uid, "daily_quotes", ["cp_aaa111222333"])
+        store.set_user_preference(uid, "price_trends", ["al_a00"])
+        prefs = store.get_user_preferences(uid)
+        assert prefs["daily_quotes"] == ["cp_aaa111222333"]
+        assert prefs["price_trends"] == ["al_a00"]
+        assert prefs["data_reports"] is None
+
+    def test_corrupt_ids_json_treated_as_none(self, store):
+        uid = self._uid(store)
+        store.set_user_preference(uid, "daily_quotes", ["cp_aaa111222333"])
+        with store._conn() as conn:
+            conn.execute(
+                "UPDATE user_preferences SET ids_json=? WHERE user_id=? AND page=?",
+                ("not-valid-json", uid, "daily_quotes"))
+        assert store.get_user_preferences(uid)["daily_quotes"] is None
+        # 非字符串列表同样降级
+        with store._conn() as conn:
+            conn.execute(
+                "UPDATE user_preferences SET ids_json=? WHERE user_id=? AND page=?",
+                ('{"x": 1}', uid, "daily_quotes"))
+        assert store.get_user_preferences(uid)["daily_quotes"] is None
+
+
 # ── 邀请码（需求2） ──────────────────────────────────
 
 class TestInviteCodes:
