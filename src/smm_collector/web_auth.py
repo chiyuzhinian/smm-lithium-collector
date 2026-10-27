@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import re
 import secrets
 import sqlite3
@@ -189,6 +190,14 @@ CREATE INDEX IF NOT EXISTS idx_invite_code_hash ON invite_codes(code_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invite_bound_user
     ON invite_codes(bound_user_id)
     WHERE bound_user_id IS NOT NULL AND revoked_at IS NULL;
+-- 用户产品选择偏好（三页独立、每用户独立；空数组=显式清空，无行=从未保存）
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    page       TEXT NOT NULL CHECK (page IN ('daily_quotes','price_trends','data_reports')),
+    ids_json   TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, page)
+);
 """
 
 
@@ -369,6 +378,46 @@ class AuthStore:
                 "INSERT INTO monthly_default_products(id, sort, updated_by, updated_at)"
                 " VALUES(?,?,?,?)",
                 [(pid, idx, updated_by, now) for idx, pid in enumerate(ids)])
+
+    # ── 用户产品选择偏好（三页独立、每用户独立） ──
+
+    # 三个页面的偏好键（与前端 Prefs 助手一致）
+    PREFERENCE_PAGES = ("daily_quotes", "price_trends", "data_reports")
+
+    def _parse_pref_ids(self, raw: str | None) -> list[str] | None:
+        """ids_json → 字符串列表；损坏/类型不符返回 None（安全降级为默认行为，绝不抛异常）。"""
+        if not raw:
+            return None
+        try:
+            v = json.loads(raw)
+        except ValueError:
+            return None
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            return None
+        return v
+
+    def get_user_preferences(self, user_id: int) -> dict[str, list[str] | None]:
+        """返回 {page: ids列表|None}；无行=None（从未保存，前端走页面默认行为），
+        有行且 ids=[] 为显式清空（前端保持空选择）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT page, ids_json FROM user_preferences WHERE user_id=?", (user_id,)
+            ).fetchall()
+        prefs: dict[str, list[str] | None] = {p: None for p in self.PREFERENCE_PAGES}
+        for r in rows:
+            if r["page"] in prefs:
+                prefs[r["page"]] = self._parse_pref_ids(r["ids_json"])
+        return prefs
+
+    def set_user_preference(self, user_id: int, page: str, ids: list[str]) -> None:
+        """UPSERT 单页偏好（单事务；ids=[] 为显式清空）。"""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO user_preferences(user_id, page, ids_json, updated_at)"
+                " VALUES(?,?,?,?)"
+                " ON CONFLICT(user_id, page) DO UPDATE SET"
+                " ids_json=excluded.ids_json, updated_at=excluded.updated_at",
+                (user_id, page, json.dumps(ids, ensure_ascii=False), _iso(_now())))
 
     # ── 邀请码（需求2：绑定制 + 多用途码；明文绝不入库/日志） ──
 

@@ -280,6 +280,29 @@ def _business_products() -> tuple[list[dict], dict]:
     return _business_cache["products"], _business_cache["meta"]
 
 
+def _filter_preference_ids(page: str, raw_ids: list) -> list[str]:
+    """偏好产品 id 白名单校验：无效项静默丢弃（保序去重），不返回 400。
+
+    daily_quotes 用 catalog id（cp_ + 12 位 hex；目录由 DB 派生随时变化，只验格式不查库，
+    真正失效的 id 由前端恢复时按目录过滤 + catalog_quotes 对未知 id 静默忽略兜底）；
+    price_trends / data_reports 用业务产品稳定 id（对照 business_products.yaml 全集）。
+    """
+    ids, seen = [], set()
+    if page == "daily_quotes":
+        for pid in raw_ids:
+            if isinstance(pid, str) and re.match(r"^cp_[0-9a-f]{12}$", pid) and pid not in seen:
+                seen.add(pid)
+                ids.append(pid)
+        return ids
+    products, _meta = _business_products()
+    valid = {p["id"] for p in products}
+    for pid in raw_ids:
+        if isinstance(pid, str) and pid in valid and pid not in seen:
+            seen.add(pid)
+            ids.append(pid)
+    return ids
+
+
 def _group_map() -> dict:
     """分类名 → 业务分组映射。"""
     cfg = _portal_config()
@@ -1503,6 +1526,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._api_portal_catalog_products()
         elif path == "/api/portal/catalog/quotes":
             self._api_portal_catalog_quotes(parse_qs(urlsplit(self.path).query))
+        elif path == "/api/user/preferences":
+            self._api_user_preferences_get()
         elif path.startswith("/api/"):
             self._serve_json({"error": "not found"}, status=404)
 
@@ -1537,6 +1562,8 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_admin_invites_post()
         elif path == "/api/admin/monthly-defaults":
             self._handle_admin_monthly_defaults_post()
+        elif path == "/api/user/preferences":
+            self._handle_user_preferences_post()
         else:
             self._serve_json({"error": "not found"}, status=404)
 
@@ -2131,6 +2158,48 @@ class DataCenterHandler(http.server.SimpleHTTPRequestHandler):
         AUTH_STORE.write_event("MONTHLY_DEFAULTS_UPDATED", "info",
                                f"{username} 更新月报默认产品清单（{len(ids)} 个）")
         self._serve_json({"ok": True, "ids": ids})
+
+    # ── 用户产品选择偏好（三页独立、每用户独立） ──
+
+    def _api_user_preferences_get(self):
+        """GET /api/user/preferences：当前登录用户的三页产品选择（读本人，登录即可）。"""
+        try:
+            prefs = AUTH_STORE.get_user_preferences(self._user["id"])
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        self._serve_json({"preferences": prefs})
+
+    def _handle_user_preferences_post(self):
+        """POST /api/user/preferences：{page, ids:[...]} 保存单页产品选择（登录+CSRF）。
+
+        无效 id 静默丢弃（保序去重）而非 400——用户态 last-write-wins 偏好，
+        与 monthly-defaults（管理员整体替换，严格 400）语义不同。"""
+        if not self._check_csrf():
+            self._serve_json({"error": "CSRF 校验失败"}, status=403)
+            return
+        body = self._read_json_body()
+        if body is None:
+            self._serve_json({"error": "请求体无效"}, status=400)
+            return
+        page = body.get("page")
+        raw_ids = body.get("ids")
+        if page not in AuthStore.PREFERENCE_PAGES or not isinstance(raw_ids, list):
+            self._serve_json({"error": "page 或 ids 无效"}, status=400)
+            return
+        ids = _filter_preference_ids(page, raw_ids)
+        user = self._user or {}
+        try:
+            AUTH_STORE.set_user_preference(user["id"], page, ids)
+        except sqlite3.Error:
+            self._serve_503()
+            return
+        try:
+            AUTH_STORE.write_event("USER_PREFERENCES_UPDATED", "info",
+                                   f"{user.get('username', '?')} 更新 {page} 产品选择（{len(ids)} 个）")
+        except sqlite3.Error:
+            pass  # 审计失败不影响已保存的偏好
+        self._serve_json({"ok": True, "page": page, "ids": ids})
 
     def _api_portal_history_download(self, q: dict):
         """GET /api/portal/history/download?ids=&from=&to=：全产品历史报价 xlsx 下载。
